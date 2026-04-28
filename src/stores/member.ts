@@ -23,7 +23,7 @@ export const useMemberStore = defineStore('member', () => {
   }
 
   function createMember(data: Omit<Member, 'id'>) {
-    const member = mockApi.createMember(data)
+    const member = mockApi.createMember({ ...data, role: data.role || 'pm' })
     members.value.push(member)
     return member
   }

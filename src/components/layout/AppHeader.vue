@@ -1,23 +1,49 @@
 <script setup lang="ts">
-// App header component
+import { computed } from 'vue'
+import { useRouter } from 'vue-router'
+import { useUserStore } from '@/stores'
+
+const router = useRouter()
+const userStore = useUserStore()
+
+const isLoggedIn = computed(() => userStore.isLoggedIn)
+const isAdmin = computed(() => userStore.isAdmin)
+const currentUser = computed(() => userStore.currentUser)
+
+function handleLogout() {
+  userStore.logout()
+  router.push('/login')
+}
 </script>
 
 <template>
   <header class="header">
     <div class="header-left">
       <h1 class="logo">GangGuan</h1>
-      <nav class="nav">
+      <nav v-if="isLoggedIn" class="nav">
         <router-link to="/" class="nav-link">仪表盘</router-link>
         <router-link to="/kanban" class="nav-link">看板</router-link>
         <router-link to="/list" class="nav-link">列表</router-link>
+        <router-link to="/timeline" class="nav-link">时间轴</router-link>
         <router-link to="/members" class="nav-link">成员</router-link>
+        <router-link v-if="isAdmin" to="/admin" class="nav-link">管理</router-link>
       </nav>
     </div>
     <div class="header-right">
-      <div class="connection-status">
-        <span class="status-dot"></span>
-        <span class="status-text">模拟模式</span>
-      </div>
+      <template v-if="isLoggedIn">
+        <router-link to="/profile" class="user-info">
+          <img :src="currentUser?.avatar" :alt="currentUser?.name" class="user-avatar" />
+          <span class="user-name">{{ currentUser?.name }}</span>
+        </router-link>
+        <button class="btn btn-ghost btn-sm" @click="handleLogout">
+          退出
+        </button>
+      </template>
+      <template v-else>
+        <router-link to="/login" class="btn btn-primary btn-sm">
+          登录
+        </router-link>
+      </template>
     </div>
   </header>
 </template>
@@ -73,28 +99,38 @@
 .header-right {
   display: flex;
   align-items: center;
-  gap: 16px;
+  gap: 12px;
 }
 
-.connection-status {
+.user-info {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 6px 12px;
-  background-color: var(--color-bg-tertiary);
+  padding: 4px 12px;
   border-radius: var(--radius-full);
+  text-decoration: none;
+  transition: background-color var(--transition-fast);
 }
 
-.status-dot {
-  width: 8px;
-  height: 8px;
-  background-color: var(--color-success);
+.user-info:hover {
+  background-color: var(--color-bg-tertiary);
+}
+
+.user-avatar {
+  width: 32px;
+  height: 32px;
   border-radius: 50%;
+  object-fit: cover;
 }
 
-.status-text {
-  font-size: 12px;
+.user-name {
+  font-size: 14px;
   font-weight: 500;
-  color: var(--color-text-secondary);
+  color: var(--color-text-primary);
+}
+
+.btn-sm {
+  padding: 6px 12px;
+  font-size: 13px;
 }
 </style>

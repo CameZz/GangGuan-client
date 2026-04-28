@@ -1,57 +1,30 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
-import type { Member } from '@/types'
-import { useMemberStore, useTaskStore } from '@/stores'
-import MemberModal from '@/components/member/MemberModal.vue'
-import EmptyState from '@/components/common/EmptyState.vue'
+import { useUserStore, useTaskStore } from '@/stores'
+import { ROLES } from '@/types'
 
-const memberStore = useMemberStore()
+const userStore = useUserStore()
 const taskStore = useTaskStore()
 
-const members = computed(() => memberStore.members)
+const users = computed(() => userStore.getAllUsers())
+const selectedRole = ref<string>('')
 
-const isModalOpen = ref(false)
-const selectedMember = ref<Member | null>(null)
+const filteredUsers = computed(() => {
+  if (!selectedRole.value) return users.value
+  return users.value.filter(u => u.role === selectedRole.value)
+})
 
-function getMemberTaskCount(memberId: string): number {
-  return taskStore.tasks.filter(t => t.assigneeId === memberId).length
+function getMemberTaskCount(userId: string): number {
+  return taskStore.tasks.filter(t => t.assigneeId === userId).length
 }
 
-function getMemberDoneCount(memberId: string): number {
-  return taskStore.tasks.filter(t => t.assigneeId === memberId && t.status === 'done').length
+function getMemberDoneCount(userId: string): number {
+  return taskStore.tasks.filter(t => t.assigneeId === userId && t.status === 'done').length
 }
 
-function openNewMemberModal() {
-  selectedMember.value = null
-  isModalOpen.value = true
-}
-
-function openEditMemberModal(member: Member) {
-  selectedMember.value = member
-  isModalOpen.value = true
-}
-
-function closeModal() {
-  isModalOpen.value = false
-  selectedMember.value = null
-}
-
-function handleSave(memberData: Partial<Member>) {
-  if (selectedMember.value) {
-    memberStore.updateMember(selectedMember.value.id, memberData)
-  } else {
-    memberStore.createMember({
-      name: memberData.name || '',
-      email: memberData.email || '',
-      avatar: memberData.avatar || ''
-    })
-  }
-  closeModal()
-}
-
-function handleDelete(memberId: string) {
-  memberStore.deleteMember(memberId)
-  closeModal()
+function getRoleName(roleType: string): string {
+  const role = ROLES.find(r => r.type === roleType)
+  return role?.name || roleType
 }
 </script>
 
@@ -60,68 +33,62 @@ function handleDelete(memberId: string) {
     <div class="page-header">
       <div class="header-content">
         <h1 class="page-title">团队成员</h1>
-        <p class="page-subtitle">管理您的团队并跟踪工作量</p>
+        <p class="page-subtitle">查看团队成员和工作量</p>
       </div>
-      <button class="btn btn-primary" @click="openNewMemberModal">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M12 5v14M5 12h14" />
-        </svg>
-        添加成员
-      </button>
+      <div class="header-actions">
+        <select v-model="selectedRole" class="input select role-filter">
+          <option value="">全部角色</option>
+          <option v-for="role in ROLES" :key="role.type" :value="role.type">
+            {{ role.name }}
+          </option>
+        </select>
+      </div>
     </div>
 
-    <div v-if="members.length > 0" class="members-grid">
+    <div v-if="filteredUsers.length > 0" class="members-grid">
       <div
-        v-for="member in members"
-        :key="member.id"
+        v-for="user in filteredUsers"
+        :key="user.id"
         class="member-card"
-        @click="openEditMemberModal(member)"
       >
         <div class="member-header">
-          <img :src="member.avatar" :alt="member.name" class="member-avatar" />
+          <img :src="user.avatar" :alt="user.name" class="member-avatar" />
           <div class="member-info">
-            <h3 class="member-name">{{ member.name }}</h3>
-            <p class="member-email">{{ member.email }}</p>
+            <h3 class="member-name">{{ user.name }}</h3>
+            <p class="member-email">{{ user.email }}</p>
+            <div class="member-tags">
+              <span class="role-badge">{{ getRoleName(user.role) }}</span>
+              <span v-if="user.isAdmin" class="admin-badge">管理员</span>
+            </div>
           </div>
         </div>
         <div class="member-stats">
           <div class="stat">
-            <span class="stat-value">{{ getMemberTaskCount(member.id) }}</span>
+            <span class="stat-value">{{ getMemberTaskCount(user.id) }}</span>
             <span class="stat-label">已分配</span>
           </div>
           <div class="stat">
-            <span class="stat-value done">{{ getMemberDoneCount(member.id) }}</span>
+            <span class="stat-value done">{{ getMemberDoneCount(user.id) }}</span>
             <span class="stat-label">已完成</span>
           </div>
           <div class="stat">
-            <span class="stat-value pending">{{ getMemberTaskCount(member.id) - getMemberDoneCount(member.id) }}</span>
+            <span class="stat-value pending">{{ getMemberTaskCount(user.id) - getMemberDoneCount(user.id) }}</span>
             <span class="stat-label">待处理</span>
           </div>
         </div>
       </div>
     </div>
 
-    <EmptyState
-      v-else
-      title="暂无成员"
-      description="添加您的第一个团队成员开始使用"
-      action-text="添加成员"
-      @action="openNewMemberModal"
-    />
-
-    <MemberModal
-      :is-open="isModalOpen"
-      :member="selectedMember"
-      @close="closeModal"
-      @save="handleSave"
-      @delete="handleDelete"
-    />
+    <div v-else class="empty-state">
+      <p>暂无成员</p>
+    </div>
   </div>
 </template>
 
 <style scoped>
 .members-page {
-  max-width: 1200px;
+  max-width: 100%;
+  width: 100%;
 }
 
 .page-header {
@@ -135,6 +102,17 @@ function handleDelete(memberId: string) {
   flex: 1;
 }
 
+.header-actions {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+
+.role-filter {
+  min-width: 120px;
+  height: 38px;
+}
+
 .page-subtitle {
   font-size: 14px;
   color: var(--color-text-secondary);
@@ -143,8 +121,36 @@ function handleDelete(memberId: string) {
 
 .members-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
   gap: 16px;
+  max-height: calc(100vh - 200px);
+  overflow-y: auto;
+  padding-right: 8px;
+}
+
+@media (min-width: 1600px) {
+  .members-grid {
+    grid-template-columns: repeat(4, 1fr);
+  }
+}
+
+@media (min-width: 2000px) {
+  .members-grid {
+    grid-template-columns: repeat(5, 1fr);
+  }
+}
+
+.members-grid::-webkit-scrollbar {
+  width: 6px;
+}
+
+.members-grid::-webkit-scrollbar-track {
+  background: var(--color-bg-tertiary);
+}
+
+.members-grid::-webkit-scrollbar-thumb {
+  background: var(--color-border);
+  border-radius: 3px;
 }
 
 .member-card {
@@ -152,7 +158,6 @@ function handleDelete(memberId: string) {
   border: 1px solid var(--color-border);
   border-radius: var(--radius-lg);
   padding: 20px;
-  cursor: pointer;
   transition: all var(--transition-fast);
 }
 
@@ -193,6 +198,32 @@ function handleDelete(memberId: string) {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  margin-bottom: 6px;
+}
+
+.member-tags {
+  display: flex;
+  gap: 6px;
+}
+
+.role-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--color-primary);
+  background-color: var(--color-primary-light);
+  border-radius: var(--radius-sm);
+}
+
+.admin-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  font-size: 11px;
+  font-weight: 500;
+  color: #d97706;
+  background-color: #fef3c7;
+  border-radius: var(--radius-sm);
 }
 
 .member-stats {
@@ -226,5 +257,11 @@ function handleDelete(memberId: string) {
   font-size: 11px;
   color: var(--color-text-muted);
   text-transform: uppercase;
+}
+
+.empty-state {
+  text-align: center;
+  padding: 48px;
+  color: var(--color-text-muted);
 }
 </style>

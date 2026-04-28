@@ -80,7 +80,12 @@ function handleSave(taskData: Partial<Task>) {
       priority: taskData.priority || 'medium',
       dueDate: taskData.dueDate || null,
       projectId: taskData.projectId || filters.value.projectId || '',
-      assigneeId: taskData.assigneeId || null
+      assigneeId: taskData.assigneeId || null,
+      stage: taskData.stage || 'filed',
+      planningId: taskData.planningId || null,
+      participants: taskData.participants || [],
+      references: taskData.references || [],
+      comments: taskData.comments || []
     })
   }
   closeModal()
