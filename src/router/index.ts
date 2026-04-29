@@ -2,7 +2,7 @@
 
 import { createRouter, createWebHistory } from 'vue-router'
 import type { RouteRecordRaw } from 'vue-router'
-import { useUserStore } from '@/stores'
+import { useUserStore, useProjectStore } from '@/stores'
 
 const routes: RouteRecordRaw[] = [
   {
@@ -12,10 +12,22 @@ const routes: RouteRecordRaw[] = [
     meta: { requiresAuth: false }
   },
   {
+    path: '/projects',
+    name: 'ProjectSelect',
+    component: () => import('@/views/ProjectSelectView.vue'),
+    meta: { requiresAuth: true }
+  },
+  {
     path: '/',
     name: 'Dashboard',
     component: () => import('@/views/DashboardView.vue'),
-    meta: { requiresAuth: true }
+    meta: { requiresAuth: true, requiresProject: true }
+  },
+  {
+    path: '/dashboard/:projectId',
+    name: 'ProjectDashboard',
+    component: () => import('@/views/DashboardView.vue'),
+    meta: { requiresAuth: true, requiresProject: true }
   },
   {
     path: '/kanban',
@@ -27,7 +39,7 @@ const routes: RouteRecordRaw[] = [
     path: '/kanban/:projectId',
     name: 'ProjectKanban',
     component: () => import('@/views/KanbanView.vue'),
-    meta: { requiresAuth: true }
+    meta: { requiresAuth: true, requiresProject: true }
   },
   {
     path: '/list',
@@ -39,7 +51,7 @@ const routes: RouteRecordRaw[] = [
     path: '/list/:projectId',
     name: 'ProjectList',
     component: () => import('@/views/ListView.vue'),
-    meta: { requiresAuth: true }
+    meta: { requiresAuth: true, requiresProject: true }
   },
   {
     path: '/members',
@@ -48,16 +60,28 @@ const routes: RouteRecordRaw[] = [
     meta: { requiresAuth: true }
   },
   {
+    path: '/members/:projectId',
+    name: 'ProjectMembers',
+    component: () => import('@/views/MembersView.vue'),
+    meta: { requiresAuth: true, requiresProject: true }
+  },
+  {
     path: '/project/:id',
     name: 'ProjectDetail',
     component: () => import('@/views/ProjectDetailView.vue'),
-    meta: { requiresAuth: true }
+    meta: { requiresAuth: true, requiresProject: true }
   },
   {
     path: '/timeline',
     name: 'Timeline',
     component: () => import('@/views/TimelineView.vue'),
     meta: { requiresAuth: true }
+  },
+  {
+    path: '/timeline/:projectId',
+    name: 'ProjectTimeline',
+    component: () => import('@/views/TimelineView.vue'),
+    meta: { requiresAuth: true, requiresProject: true }
   },
   {
     path: '/profile',
@@ -81,11 +105,14 @@ const router = createRouter({
 // Navigation guard
 router.beforeEach((to, _from, next) => {
   const userStore = useUserStore()
+  const projectStore = useProjectStore()
 
   if (to.meta.requiresAuth !== false && !userStore.isLoggedIn) {
     next('/login')
   } else if (to.meta.requiresAdmin && !userStore.isAdmin) {
     next('/')
+  } else if (to.meta.requiresProject && !projectStore.currentProjectId) {
+    next('/projects')
   } else {
     next()
   }

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, watchEffect } from 'vue'
 import { useRoute } from 'vue-router'
 import type { Task, TaskStatus, TaskPriority } from '@/types'
 import { useTaskStore, useProjectStore, useMemberStore } from '@/stores'
@@ -21,23 +21,50 @@ const projectStore = useProjectStore()
 const memberStore = useMemberStore()
 
 const filters = ref<TaskFilters>({
-  projectId: route.params.projectId as string | undefined,
+  projectId: undefined,
   status: undefined,
   priority: undefined,
   assigneeId: undefined
 })
 
+const selectedPlanningId = computed(() => projectStore.selectedPlanningId)
+
 const isModalOpen = ref(false)
 const selectedTask = ref<Task | null>(null)
 
+// Sync projectId from route (only when it changes)
+watchEffect(() => {
+  const projectId = route.params.projectId as string | undefined
+  if (projectId && projectStore.currentProjectId !== projectId) {
+    projectStore.setCurrentProject(projectId)
+  }
+  filters.value.projectId = projectId || ''
+})
+
+// Sync planningId from route (only when it changes)
+watchEffect(() => {
+  const planningId = route.query.planning as string | undefined
+  if (planningId && projectStore.selectedPlanningId !== planningId) {
+    projectStore.setSelectedPlanning(planningId)
+  }
+})
+
 const filteredTasks = computed(() => {
-  return taskStore.tasks.filter(task => {
-    if (filters.value.projectId && task.projectId !== filters.value.projectId) return false
-    if (filters.value.status && task.status !== filters.value.status) return false
-    if (filters.value.priority && task.priority !== filters.value.priority) return false
-    if (filters.value.assigneeId !== undefined && task.assigneeId !== filters.value.assigneeId) return false
-    return true
-  })
+  const projectId = filters.value.projectId
+  const planningId = selectedPlanningId.value
+
+  // 先按项目过滤
+  let tasks = taskStore.tasks
+  if (projectId) {
+    tasks = tasks.filter(t => t.projectId === projectId)
+  }
+
+  // 再按迭代过滤（如果有选中迭代）
+  if (planningId) {
+    tasks = tasks.filter(t => t.planningId === planningId)
+  }
+
+  return tasks
 })
 
 const currentProject = computed(() => {

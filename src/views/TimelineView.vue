@@ -1,9 +1,11 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, watchEffect } from 'vue'
+import { useRoute } from 'vue-router'
 import { useTaskStore, useProjectStore, useMemberStore } from '@/stores'
 import { ROLES, TASK_STAGES } from '@/types'
 import type { RoleType } from '@/types'
 
+const route = useRoute()
 const taskStore = useTaskStore()
 const projectStore = useProjectStore()
 const memberStore = useMemberStore()
@@ -11,12 +13,39 @@ const memberStore = useMemberStore()
 const tasks = computed(() => taskStore.tasks)
 const projects = computed(() => projectStore.projects)
 const members = computed(() => memberStore.members)
+const selectedPlanningId = computed(() => projectStore.selectedPlanningId)
 
 const selectedProjectId = ref<string>('')
 
+// Sync projectId from route (only when it changes)
+watchEffect(() => {
+  const projectId = route.params.projectId as string | undefined
+  if (projectId && projectStore.currentProjectId !== projectId) {
+    projectStore.setCurrentProject(projectId)
+  }
+  selectedProjectId.value = projectId || ''
+})
+
+// Sync planningId from route (only when it changes)
+watchEffect(() => {
+  const planningId = route.query.planning as string | undefined
+  if (planningId && projectStore.selectedPlanningId !== planningId) {
+    projectStore.setSelectedPlanning(planningId)
+  }
+})
+
 const filteredTasks = computed(() => {
-  if (!selectedProjectId.value) return tasks.value
-  return tasks.value.filter(t => t.projectId === selectedProjectId.value)
+  let result = tasks.value
+
+  if (selectedProjectId.value) {
+    result = result.filter(t => t.projectId === selectedProjectId.value)
+  }
+
+  if (selectedPlanningId.value) {
+    result = result.filter(t => t.planningId === selectedPlanningId.value)
+  }
+
+  return result
 })
 
 const timelineStart = computed(() => {

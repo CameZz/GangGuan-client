@@ -1,31 +1,43 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useRouter } from 'vue-router'
-import { useUserStore } from '@/stores'
+import { useUserStore, useProjectStore } from '@/stores'
 
 const router = useRouter()
 const userStore = useUserStore()
+const projectStore = useProjectStore()
 
 const isLoggedIn = computed(() => userStore.isLoggedIn)
 const isAdmin = computed(() => userStore.isAdmin)
 const currentUser = computed(() => userStore.currentUser)
+const currentProject = computed(() => projectStore.currentProject)
+const selectedPlanningId = computed(() => projectStore.selectedPlanningId)
 
 function handleLogout() {
   userStore.logout()
+  projectStore.setCurrentProject(null)
   router.push('/login')
+}
+
+function getNavLink(path: string): string {
+  if (!currentProject.value) return path
+  const base = `${path}/${currentProject.value.id}`
+  if (selectedPlanningId.value) {
+    return `${base}?planning=${selectedPlanningId.value}`
+  }
+  return base
 }
 </script>
 
 <template>
   <header class="header">
     <div class="header-left">
-      <h1 class="logo">GangGuan</h1>
-      <nav v-if="isLoggedIn" class="nav">
-        <router-link to="/" class="nav-link">仪表盘</router-link>
-        <router-link to="/kanban" class="nav-link">看板</router-link>
-        <router-link to="/list" class="nav-link">列表</router-link>
-        <router-link to="/timeline" class="nav-link">时间轴</router-link>
-        <router-link to="/members" class="nav-link">成员</router-link>
+      <h1 class="logo" @click="router.push(currentProject ? '/projects' : '/login')">钢 管 系 统</h1>
+      <nav v-if="isLoggedIn && currentProject" class="nav">
+        <router-link :to="getNavLink('/kanban')" class="nav-link">看板</router-link>
+        <router-link :to="getNavLink('/list')" class="nav-link">列表</router-link>
+        <router-link :to="getNavLink('/timeline')" class="nav-link">时间轴</router-link>
+        <router-link :to="getNavLink('/members')" class="nav-link">成员</router-link>
         <router-link v-if="isAdmin" to="/admin" class="nav-link">管理</router-link>
       </nav>
     </div>

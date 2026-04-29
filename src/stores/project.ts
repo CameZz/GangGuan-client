@@ -8,6 +8,7 @@ import mockApi from '@/utils/mock'
 export const useProjectStore = defineStore('project', () => {
   const projects = ref<Project[]>([])
   const currentProjectId = ref<string | null>(null)
+  const selectedPlanningId = ref<string | null>(null)
   const isLoading = ref(false)
 
   const currentProject = computed(() => {
@@ -25,7 +26,19 @@ export const useProjectStore = defineStore('project', () => {
   }
 
   function setCurrentProject(id: string | null) {
-    currentProjectId.value = id
+    // Only reset planning if project actually changed
+    if (currentProjectId.value !== id) {
+      currentProjectId.value = id
+      selectedPlanningId.value = null
+    }
+  }
+
+  function setSelectedPlanning(id: string | null) {
+    selectedPlanningId.value = id
+  }
+
+  function clearSelectedPlanning() {
+    selectedPlanningId.value = null
   }
 
   function createProject(data: Omit<Project, 'id' | 'createdAt'>) {
@@ -80,8 +93,11 @@ export const useProjectStore = defineStore('project', () => {
     currentProject,
     projectCount,
     isLoading,
+    selectedPlanningId,
     init,
     setCurrentProject,
+    setSelectedPlanning,
+    clearSelectedPlanning,
     createProject,
     updateProject,
     deleteProject

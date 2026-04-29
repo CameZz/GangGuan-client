@@ -20,7 +20,7 @@ function handleLogin() {
 
   const success = userStore.login(employeeId.value, password.value)
   if (success) {
-    router.push('/')
+    router.push('/projects')
   } else {
     error.value = '工号或密码错误'
   }
@@ -31,7 +31,7 @@ function handleLogin() {
   <div class="login-page">
     <div class="login-card">
       <div class="login-header">
-        <h1 class="login-title">GangGuan</h1>
+        <h1 class="login-title">钢管系统</h1>
         <p class="login-subtitle">项目管理平台</p>
       </div>
 

@@ -1,25 +1,95 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
-import { useUserStore, useTaskStore } from '@/stores'
+import { ref, computed, watchEffect } from 'vue'
+import { useRoute } from 'vue-router'
+import { useUserStore, useTaskStore, useProjectStore } from '@/stores'
 import { ROLES } from '@/types'
 
+const route = useRoute()
 const userStore = useUserStore()
 const taskStore = useTaskStore()
+const projectStore = useProjectStore()
 
 const users = computed(() => userStore.getAllUsers())
 const selectedRole = ref<string>('')
 
+// Get projectId and planningId from route
+const projectId = computed(() => route.params.projectId as string | undefined)
+const planningId = computed(() => route.query.planning as string | undefined)
+
+// Sync to store when route changes
+watchEffect(() => {
+  if (projectId.value) {
+    projectStore.setCurrentProject(projectId.value)
+  }
+})
+
+watchEffect(() => {
+  if (planningId.value) {
+    projectStore.setSelectedPlanning(planningId.value)
+  }
+})
+
 const filteredUsers = computed(() => {
-  if (!selectedRole.value) return users.value
-  return users.value.filter(u => u.role === selectedRole.value)
+  let result = users.value
+
+  // Filter by planning if selected - get all participants from tasks in this planning
+  if (planningId.value) {
+    const planningTasks = taskStore.tasks.filter(t => t.planningId === planningId.value)
+
+    // Get all unique participant memberIds
+    const participantIds = planningTasks.flatMap(t =>
+      t.participants
+        .map(p => p.memberId)
+        .filter(Boolean)
+    )
+    const uniqueParticipantIds = [...new Set(participantIds)] as string[]
+
+    result = result.filter(u => uniqueParticipantIds.includes(u.id))
+  }
+
+  // Filter by role if selected
+  if (selectedRole.value) {
+    result = result.filter(u => u.role === selectedRole.value)
+  }
+
+  return result
 })
 
 function getMemberTaskCount(userId: string): number {
-  return taskStore.tasks.filter(t => t.assigneeId === userId).length
+  let tasks = taskStore.tasks.filter(t => t.projectId === projectId.value)
+  if (planningId.value) {
+    tasks = tasks.filter(t => t.planningId === planningId.value)
+  }
+  return tasks.filter(t =>
+    t.assigneeId === userId ||
+    t.participants.some(p => p.memberId === userId)
+  ).length
 }
 
 function getMemberDoneCount(userId: string): number {
-  return taskStore.tasks.filter(t => t.assigneeId === userId && t.status === 'done').length
+  let tasks = taskStore.tasks.filter(t => t.projectId === projectId.value)
+  if (planningId.value) {
+    tasks = tasks.filter(t => t.planningId === planningId.value)
+  }
+  return tasks.filter(t =>
+    (t.assigneeId === userId || t.participants.some(p => p.memberId === userId)) &&
+    t.status === 'done'
+  ).length
+}
+
+function getMemberOverdueCount(userId: string): number {
+  const now = new Date()
+  let tasks = taskStore.tasks.filter(t => t.projectId === projectId.value)
+  if (planningId.value) {
+    tasks = tasks.filter(t => t.planningId === planningId.value)
+  }
+  return tasks.filter(t => {
+    const isParticipant = t.assigneeId === userId || t.participants.some(p => p.memberId === userId)
+    if (!isParticipant) return false
+    if (t.status === 'done') return false
+    if (!t.dueDate) return false
+    return new Date(t.dueDate) < now
+  }).length
 }
 
 function getRoleName(roleType: string): string {
@@ -74,6 +144,10 @@ function getRoleName(roleType: string): string {
           <div class="stat">
             <span class="stat-value pending">{{ getMemberTaskCount(user.id) - getMemberDoneCount(user.id) }}</span>
             <span class="stat-label">待处理</span>
+          </div>
+          <div class="stat">
+            <span class="stat-value overdue">{{ getMemberOverdueCount(user.id) }}</span>
+            <span class="stat-label">已延误</span>
           </div>
         </div>
       </div>
@@ -228,7 +302,7 @@ function getRoleName(roleType: string): string {
 
 .member-stats {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(4, 1fr);
   gap: 12px;
   padding-top: 16px;
   border-top: 1px solid var(--color-border);
@@ -251,6 +325,10 @@ function getRoleName(roleType: string): string {
 
 .stat-value.pending {
   color: var(--color-warning);
+}
+
+.stat-value.overdue {
+  color: var(--color-danger);
 }
 
 .stat-label {
