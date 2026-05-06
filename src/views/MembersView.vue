@@ -102,8 +102,6 @@ function getRoleName(roleType: string): string {
   <div class="page members-page">
     <div class="page-header">
       <div class="header-content">
-        <h1 class="page-title">团队成员</h1>
-        <p class="page-subtitle">查看团队成员和工作量</p>
       </div>
       <div class="header-actions">
         <select v-model="selectedRole" class="input select role-filter">

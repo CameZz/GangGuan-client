@@ -33,6 +33,18 @@ function getNavLink(path: string): string {
   <header class="header">
     <div class="header-left">
       <h1 class="logo" @click="router.push(currentProject ? '/projects' : '/login')">钢 管 系 统</h1>
+      <div v-if="currentProject" class="project-info">
+        <div class="project-icon">{{ currentProject.name.charAt(0).toUpperCase() }}</div>
+        <div class="project-details">
+          <span class="project-name">{{ currentProject.name }}</span>
+          <button class="btn-switch" @click="router.push('/projects')">
+            <svg width="14" height="14" viewBox="0 -5 24 25" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M16 3l4 4-4 4M20 7H4M8 21l-4-4 4-4M4 17h16" />
+            </svg>
+            切换项目
+        </button>
+        </div>
+      </div>
       <nav v-if="isLoggedIn && currentProject" class="nav">
         <router-link :to="getNavLink('/kanban')" class="nav-link">看板</router-link>
         <router-link :to="getNavLink('/list')" class="nav-link">列表</router-link>
@@ -74,7 +86,57 @@ function getNavLink(path: string): string {
 .header-left {
   display: flex;
   align-items: center;
-  gap: 32px;
+  gap: 24px;
+}
+
+.project-info {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 12px;
+  border-left: 1px solid var(--color-border);
+  border-right: 1px solid var(--color-border);
+}
+
+.project-icon {
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, var(--color-primary) 0%, #8b5cf6 100%);
+  border-radius: var(--radius-md);
+  font-weight: 700;
+  font-size: 14px;
+  color: white;
+  flex-shrink: 0;
+}
+
+.project-details {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.project-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  line-height: 1.2;
+}
+
+.btn-switch {
+  padding: 0;
+  font-size: 11px;
+  color: var(--color-text-muted);
+  background: none;
+  border: none;
+  cursor: pointer;
+  line-height: 1.2;
+}
+
+.btn-switch:hover {
+  color: var(--color-primary);
 }
 
 .logo {

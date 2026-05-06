@@ -62,7 +62,6 @@ export const useUserStore = defineStore('user', () => {
   }
 
   function getAllUsers(): User[] {
-    if (!currentUser.value?.isAdmin) return []
     return mockApi.getUsers()
   }
 

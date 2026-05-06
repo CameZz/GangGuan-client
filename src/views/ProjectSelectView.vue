@@ -26,7 +26,7 @@ function handleLogout() {
   <div class="project-select-page">
     <header class="page-header">
       <div class="header-left">
-        <h1 class="logo">钢管</h1>
+        <h1 class="logo">钢 管 系 统</h1>
         <span class="user-greeting">{{ currentUser?.name }}，欢迎回来</span>
       </div>
       <button class="btn btn-ghost" @click="handleLogout">退出登录</button>

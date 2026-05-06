@@ -137,8 +137,6 @@ const formatDate = (date: Date): string => {
   <div class="page timeline-page">
     <div class="page-header">
       <div class="header-content">
-        <h1 class="page-title">时间轴视图</h1>
-        <p class="page-subtitle">查看任务各参与角色的时间安排</p>
       </div>
       <div class="header-actions">
         <select v-model="selectedProjectId" class="input select">

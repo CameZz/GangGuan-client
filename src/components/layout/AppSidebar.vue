@@ -1,20 +1,58 @@
 <script setup lang="ts">
-import { computed, watch } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
-import { useProjectStore, usePlanningStore } from '@/stores'
+import { useProjectStore, usePlanningStore, useTaskStore } from '@/stores'
+import type { Planning } from '@/types'
 
 const router = useRouter()
 const route = useRoute()
 const projectStore = useProjectStore()
 const planningStore = usePlanningStore()
+const taskStore = useTaskStore()
 
 const currentProject = computed(() => projectStore.currentProject)
 const selectedPlanningId = computed(() => projectStore.selectedPlanningId)
 
+// Collapse state
+const incompleteExpanded = ref(true)
+const completedExpanded = ref(true)
+
+// New planning form state
+const showNewPlanningForm = ref(false)
+const newPlanningName = ref('')
+const newPlanningDeadline = ref('')
+
+// Sort by deadline helper
+function sortByDeadline(plannings: Planning[], ascending: boolean = true): Planning[] {
+  return [...plannings].sort((a, b) => {
+    if (!a.deadline) return 1
+    if (!b.deadline) return -1
+    const diff = new Date(a.deadline).getTime() - new Date(b.deadline).getTime()
+    return ascending ? diff : -diff
+  })
+}
+
 // Get plannings for current project only
 const plannings = computed(() => {
   if (!currentProject.value) return []
-  return planningStore.plannings.filter(p => p.projectId === currentProject.value!.id)
+  return planningStore.plannings.filter((p: Planning) => p.projectId === currentProject.value!.id)
+})
+
+// Check if a planning is completed (all tasks are done)
+function isPlanningCompleted(planningId: string): boolean {
+  const planningTasks = taskStore.tasks.filter((t: any) => t.planningId === planningId)
+  if (planningTasks.length === 0) return false
+  return planningTasks.every((t: any) => t.status === 'done')
+}
+
+// Completed plannings (deadline closest first - descending)
+const completedPlannings = computed(() => {
+  return sortByDeadline(plannings.value.filter((p: Planning) => isPlanningCompleted(p.id)), false)
+})
+
+// Incomplete plannings (deadline earliest first - ascending)
+const incompletePlannings = computed(() => {
+  return sortByDeadline(plannings.value.filter((p: Planning) => !isPlanningCompleted(p.id)), true)
 })
 
 // Auto-select first planning when project changes and no planning is selected
@@ -49,51 +87,118 @@ watch(selectedPlanningId, (newId) => {
   }
 })
 
-function exitProject() {
-  projectStore.setCurrentProject(null)
-  router.push('/projects')
-}
-
 function selectIteration(planningId: string) {
   projectStore.setSelectedPlanning(planningId)
+}
+
+function toggleNewPlanningForm() {
+  showNewPlanningForm.value = !showNewPlanningForm.value
+  if (!showNewPlanningForm.value) {
+    newPlanningName.value = ''
+    newPlanningDeadline.value = ''
+  }
+}
+
+function createPlanning() {
+  if (!newPlanningName.value.trim() || !currentProject.value) return
+
+  const planning = planningStore.createPlanning({
+    name: newPlanningName.value.trim(),
+    deadline: newPlanningDeadline.value ? new Date(newPlanningDeadline.value).toISOString() : null,
+    projectId: currentProject.value.id
+  })
+
+  // Reset form
+  newPlanningName.value = ''
+  newPlanningDeadline.value = ''
+  showNewPlanningForm.value = false
+
+  // Auto-select the new planning
+  if (planning) {
+    projectStore.setSelectedPlanning(planning.id)
+  }
 }
 </script>
 
 <template>
   <aside class="sidebar">
     <template v-if="currentProject">
-      <div class="sidebar-header">
-        <div class="project-info">
-          <div class="project-icon">{{ currentProject.name.charAt(0).toUpperCase() }}</div>
-          <div class="project-details">
-            <h2 class="project-name">{{ currentProject.name }}</h2>
-            <button class="btn-exit" @click="exitProject">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M16 3l4 4-4 4M20 7H4M8 21l-4-4 4-4M4 17h16" />
-              </svg>
-              切换项目
-            </button>
-          </div>
-        </div>
-      </div>
-
       <div class="sidebar-section">
         <div class="section-header">
           <span class="section-title">迭代</span>
+          <button class="btn-add" @click="toggleNewPlanningForm" :title="showNewPlanningForm ? '取消' : '新增迭代'">
+            {{ showNewPlanningForm ? '✕' : '+' }}
+          </button>
         </div>
-        <div class="iteration-list">
-          <div
-            v-for="planning in plannings"
-            :key="planning.id"
-            class="iteration-item"
-            :class="{ selected: selectedPlanningId === planning.id }"
-            @click="selectIteration(planning.id)"
-          >
-            <span class="iteration-name">{{ planning.name }}</span>
-            <span v-if="planning.deadline" class="iteration-deadline">
-              {{ new Date(planning.deadline).toLocaleDateString() }}
-            </span>
+
+        <!-- New Planning Form -->
+        <div v-if="showNewPlanningForm" class="new-planning-form">
+          <input
+            v-model="newPlanningName"
+            type="text"
+            class="input"
+            placeholder="迭代名称"
+            @keyup.enter="createPlanning"
+          />
+          <input
+            v-model="newPlanningDeadline"
+            type="date"
+            class="input"
+            placeholder="截止日期"
+          />
+          <div class="form-actions">
+            <button class="btn btn-primary btn-sm" @click="createPlanning" :disabled="!newPlanningName.trim()">
+              创建
+            </button>
+            <button class="btn btn-secondary btn-sm" @click="toggleNewPlanningForm">
+              取消
+            </button>
           </div>
+        </div>
+
+        <div class="iteration-list">
+          <template v-if="incompletePlannings.length > 0">
+            <div class="iteration-group-title" @click="incompleteExpanded = !incompleteExpanded">
+              <span class="expand-icon" :class="{ expanded: incompleteExpanded }">▶</span>
+              未完成迭代 ({{ incompletePlannings.length }})
+            </div>
+            <template v-if="incompleteExpanded">
+              <div
+                v-for="planning in incompletePlannings"
+                :key="planning.id"
+                class="iteration-item"
+                :class="{ selected: selectedPlanningId === planning.id }"
+                @click="selectIteration(planning.id)"
+              >
+                <span class="iteration-name">{{ planning.name }}</span>
+                <span v-if="planning.deadline" class="iteration-deadline">
+                  {{ new Date(planning.deadline).toLocaleDateString() }}
+                </span>
+              </div>
+            </template>
+          </template>
+
+          <template v-if="completedPlannings.length > 0">
+            <div class="iteration-group-title" @click="completedExpanded = !completedExpanded">
+              <span class="expand-icon" :class="{ expanded: completedExpanded }">▶</span>
+              已完成迭代 ({{ completedPlannings.length }})
+            </div>
+            <template v-if="completedExpanded">
+              <div
+                v-for="planning in completedPlannings"
+                :key="planning.id"
+                class="iteration-item completed"
+                :class="{ selected: selectedPlanningId === planning.id }"
+                @click="selectIteration(planning.id)"
+              >
+                <span class="iteration-name">{{ planning.name }}</span>
+                <span v-if="planning.deadline" class="iteration-deadline">
+                  {{ new Date(planning.deadline).toLocaleDateString() }}
+                </span>
+              </div>
+            </template>
+          </template>
+
           <div v-if="plannings.length === 0" class="empty-iterations">
             暂无迭代
           </div>
@@ -121,63 +226,6 @@ function selectIteration(planningId: string) {
   overflow-y: auto;
 }
 
-.sidebar-header {
-  padding: 16px;
-  border-bottom: 1px solid var(--color-border);
-}
-
-.project-info {
-  display: flex;
-  gap: 12px;
-}
-
-.project-icon {
-  width: 40px;
-  height: 40px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: linear-gradient(135deg, var(--color-primary) 0%, #8b5cf6 100%);
-  border-radius: var(--radius-md);
-  font-weight: 700;
-  color: white;
-  flex-shrink: 0;
-}
-
-.project-details {
-  flex: 1;
-  min-width: 0;
-}
-
-.project-name {
-  font-size: 15px;
-  font-weight: 600;
-  color: var(--color-text-primary);
-  margin-bottom: 4px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.btn-exit {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 2px 8px;
-  font-size: 12px;
-  color: var(--color-text-muted);
-  background: none;
-  border: none;
-  cursor: pointer;
-  border-radius: var(--radius-sm);
-  transition: all var(--transition-fast);
-}
-
-.btn-exit:hover {
-  background-color: var(--color-bg-tertiary);
-  color: var(--color-text-primary);
-}
-
 .sidebar-section {
   padding: 12px 8px;
   flex: 1;
@@ -198,6 +246,59 @@ function selectIteration(planningId: string) {
   color: var(--color-text-muted);
   text-transform: uppercase;
   letter-spacing: 0.05em;
+}
+
+.btn-add {
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: none;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  font-size: 16px;
+  transition: all var(--transition-fast);
+}
+
+.btn-add:hover {
+  background-color: var(--color-bg-tertiary);
+  color: var(--color-text-primary);
+}
+
+.new-planning-form {
+  padding: 8px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border-bottom: 1px solid var(--color-border);
+  margin-bottom: 8px;
+}
+
+.new-planning-form .input {
+  width: 100%;
+  padding: 6px 8px;
+  font-size: 13px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background-color: var(--color-bg-primary);
+  color: var(--color-text-primary);
+}
+
+.new-planning-form .input:focus {
+  outline: none;
+  border-color: var(--color-primary);
+}
+
+.form-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.form-actions .btn {
+  flex: 1;
 }
 
 .iteration-list {
@@ -232,20 +333,6 @@ function selectIteration(planningId: string) {
   color: rgba(255, 255, 255, 0.7);
 }
 
-.btn-clear {
-  padding: 2px 6px;
-  font-size: 10px;
-  color: var(--color-text-muted);
-  background: var(--color-bg-tertiary);
-  border: none;
-  border-radius: var(--radius-sm);
-  cursor: pointer;
-}
-
-.btn-clear:hover {
-  color: var(--color-text-primary);
-}
-
 .iteration-name {
   flex: 1;
   white-space: nowrap;
@@ -258,6 +345,41 @@ function selectIteration(planningId: string) {
   color: var(--color-text-muted);
   flex-shrink: 0;
   margin-left: 8px;
+}
+
+.iteration-group-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--color-text-muted);
+  padding: 8px 12px 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  cursor: pointer;
+  user-select: none;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.iteration-group-title:hover {
+  color: var(--color-text-secondary);
+}
+
+.expand-icon {
+  font-size: 8px;
+  transition: transform var(--transition-fast);
+}
+
+.expand-icon.expanded {
+  transform: rotate(90deg);
+}
+
+.iteration-item.completed {
+  opacity: 0.6;
+}
+
+.iteration-item.completed .iteration-name {
+  text-decoration: line-through;
 }
 
 .empty-iterations {

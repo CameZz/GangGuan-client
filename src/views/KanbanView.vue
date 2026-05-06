@@ -140,8 +140,6 @@ function handleDrop(e: DragEvent, status: TaskStatus) {
   <div class="page kanban-page">
     <div class="page-header">
       <div class="header-content">
-        <h1 class="page-title">{{ currentProject?.name || '所有任务' }}</h1>
-        <p v-if="currentProject" class="page-subtitle">{{ currentProject.description }}</p>
       </div>
       <button class="btn btn-primary" @click="openNewTaskModal">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">

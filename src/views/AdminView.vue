@@ -92,8 +92,6 @@ function getRoleName(roleType: RoleType): string {
   <div class="page admin-page">
     <div class="page-header">
       <div class="header-content">
-        <h1 class="page-title">管理面板</h1>
-        <p class="page-subtitle">管理系统用户和项目成员</p>
       </div>
       <div class="header-actions">
         <select v-model="selectedRole" class="input select role-filter">
@@ -112,7 +110,6 @@ function getRoleName(roleType: RoleType): string {
     </div>
 
     <div class="users-section">
-      <h2 class="section-title">用户列表</h2>
       <div class="users-table">
         <table>
           <thead>
@@ -310,7 +307,7 @@ function getRoleName(roleType: RoleType): string {
   border: 1px solid var(--color-border);
   border-radius: var(--radius-lg);
   overflow: hidden;
-  max-height: calc(100vh - 250px);
+  max-height: calc(100vh - 190px);
   overflow-y: auto;
 }
 

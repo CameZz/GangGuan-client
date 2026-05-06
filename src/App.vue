@@ -1,14 +1,20 @@
 <script setup lang="ts">
-import { RouterView } from 'vue-router'
+import { computed } from 'vue'
+import { RouterView, useRoute } from 'vue-router'
 import AppHeader from '@/components/layout/AppHeader.vue'
 import AppSidebar from '@/components/layout/AppSidebar.vue'
+
+const route = useRoute()
+const hideSidebarRoutes = ['/projects', '/login', '/admin']
+const showSidebar = computed(() => !hideSidebarRoutes.includes(route.path))
+const showHeader = computed(() => route.path !== '/projects' && route.path !== '/login')
 </script>
 
 <template>
   <div class="app">
-    <AppHeader />
+    <AppHeader v-if="showHeader" />
     <div class="app-body">
-      <AppSidebar />
+      <AppSidebar v-if="showSidebar" />
       <main class="app-main">
         <RouterView />
       </main>
