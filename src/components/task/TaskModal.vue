@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { ref, watch, computed } from 'vue'
-import type { Task, TaskStatus, TaskPriority, TaskStage, Participant, Reference, Comment, RoleType } from '@/types'
-import { useProjectStore, useMemberStore, usePlanningStore } from '@/stores'
+import type { Task, TaskStatus, TaskPriority, TaskStage, Participant, Reference, Comment, RoleType, TaskHistory } from '@/types'
+import { HISTORY_FIELD_LABELS } from '@/types'
+import { useMemberStore, usePlanningStore, useTaskStore } from '@/stores'
 import { TASK_STAGES, ROLES } from '@/types'
 import MemberAvatar from '@/components/member/MemberAvatar.vue'
 
@@ -16,11 +17,10 @@ const emit = defineEmits<{
   delete: [id: string]
 }>()
 
-const projectStore = useProjectStore()
 const memberStore = useMemberStore()
 const planningStore = usePlanningStore()
+const taskStore = useTaskStore()
 
-const projects = computed(() => projectStore.projects)
 const members = computed(() => memberStore.members)
 const plannings = computed(() => planningStore.plannings)
 
@@ -30,7 +30,6 @@ const form = ref({
   status: 'todo' as TaskStatus,
   priority: 'medium' as TaskPriority,
   dueDate: '',
-  projectId: '',
   assigneeId: null as string | null,
   stage: 'filed' as TaskStage,
   planningId: null as string | null,
@@ -39,17 +38,17 @@ const form = ref({
   comments: [] as Comment[]
 })
 
-const activeTab = ref<'main' | 'participants' | 'references' | 'comments'>('main')
+const activeTab = ref<'main' | 'participants' | 'references' | 'comments' | 'history'>('main')
 
 watch(() => props.isOpen, (open) => {
   if (open && props.task) {
+    loadHistories()
     form.value = {
       title: props.task.title,
       description: props.task.description,
       status: props.task.status,
       priority: props.task.priority,
       dueDate: props.task.dueDate ? props.task.dueDate.split('T')[0] : '',
-      projectId: props.task.projectId,
       assigneeId: props.task.assigneeId,
       stage: props.task.stage || 'filed',
       planningId: props.task.planningId || null,
@@ -58,14 +57,12 @@ watch(() => props.isOpen, (open) => {
       comments: [...(props.task.comments || [])]
     }
   } else if (open) {
-    const defaultProjectId = projects.value[0]?.id || ''
     form.value = {
       title: '',
       description: '',
       status: 'todo',
       priority: 'medium',
       dueDate: '',
-      projectId: defaultProjectId,
       assigneeId: null,
       stage: 'filed',
       planningId: null,
@@ -80,11 +77,6 @@ watch(() => props.isOpen, (open) => {
 })
 
 const isEditing = computed(() => !!props.task)
-
-const projectPlannings = computed(() => {
-  if (!form.value.projectId) return []
-  return plannings.value.filter(p => p.projectId === form.value.projectId)
-})
 
 const availableMembers = computed(() => {
   return members.value
@@ -106,6 +98,7 @@ function handleDelete() {
 
 function selectMember(memberId: string | null) {
   form.value.assigneeId = memberId
+  showMemberDropdown.value = false
 }
 
 function addParticipant() {
@@ -161,6 +154,24 @@ function getMemberName(memberId: string): string {
   const member = members.value.find(m => m.id === memberId)
   return member?.name || '未分配'
 }
+
+const taskHistories = ref<TaskHistory[]>([])
+const showMemberDropdown = ref(false)
+
+const currentAssignee = computed(() => {
+  if (!form.value.assigneeId) return null
+  return members.value.find(m => m.id === form.value.assigneeId) || null
+})
+
+function loadHistories() {
+  if (props.task?.id) {
+    taskHistories.value = taskStore.getTaskHistories(props.task.id)
+  }
+}
+
+function getHistoryFieldLabel(field: string): string {
+  return HISTORY_FIELD_LABELS[field] || field
+}
 </script>
 
 <template>
@@ -196,9 +207,15 @@ function getMemberName(memberId: string): string {
           :class="{ active: activeTab === 'comments' }"
           @click="activeTab = 'comments'"
         >评论 ({{ form.comments.length }})</button>
+        <button
+          v-if="isEditing"
+          class="tab"
+          :class="{ active: activeTab === 'history' }"
+          @click="activeTab = 'history'"
+        >历史记录</button>
       </div>
 
-      <div class="modal-body">
+      <div class="modal-body" @click="showMemberDropdown = false">
         <div v-show="activeTab === 'main'">
           <div class="form-group">
             <label class="label">标题</label>
@@ -224,6 +241,7 @@ function getMemberName(memberId: string): string {
                 <option value="todo">待办</option>
                 <option value="in-progress">进行中</option>
                 <option value="done">已完成</option>
+                <option value="abandoned">已废弃</option>
               </select>
             </div>
             <div class="form-group">
@@ -235,25 +253,14 @@ function getMemberName(memberId: string): string {
               </select>
             </div>
           </div>
-          <div class="form-row">
-            <div class="form-group">
-              <label class="label">项目</label>
-              <select v-model="form.projectId" class="input select">
-                <option value="">选择项目</option>
-                <option v-for="project in projects" :key="project.id" :value="project.id">
-                  {{ project.name }}
-                </option>
-              </select>
-            </div>
-            <div class="form-group">
-              <label class="label">规划</label>
-              <select v-model="form.planningId" class="input select">
-                <option :value="null">无规划</option>
-                <option v-for="planning in projectPlannings" :key="planning.id" :value="planning.id">
-                  {{ planning.name }}
-                </option>
-              </select>
-            </div>
+          <div class="form-group">
+            <label class="label">规划</label>
+            <select v-model="form.planningId" class="input select">
+              <option :value="null">无规划</option>
+              <option v-for="planning in plannings" :key="planning.id" :value="planning.id">
+                {{ planning.name }}
+              </option>
+            </select>
           </div>
           <div class="form-row">
             <div class="form-group">
@@ -271,8 +278,17 @@ function getMemberName(memberId: string): string {
           </div>
           <div class="form-group">
             <label class="label">负责人</label>
-            <div class="member-selector">
-              <div class="member-list">
+            <div class="member-selector" @click.stop>
+              <div class="member-trigger" @click="showMemberDropdown = !showMemberDropdown">
+                <div class="member-trigger-info">
+                  <MemberAvatar :member="currentAssignee" size="sm" />
+                  <span>{{ currentAssignee?.name || '未分配' }}</span>
+                </div>
+                <svg class="member-trigger-arrow" :class="{ open: showMemberDropdown }" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M6 9l6 6 6-6" />
+                </svg>
+              </div>
+              <div v-show="showMemberDropdown" class="member-dropdown">
                 <div
                   class="member-option"
                   :class="{ selected: form.assigneeId === null }"
@@ -405,6 +421,31 @@ function getMemberName(memberId: string): string {
           </div>
           <button class="btn btn-secondary" @click="addComment">添加评论</button>
         </div>
+
+        <div v-show="activeTab === 'history'" class="tab-content">
+          <div v-if="taskHistories.length === 0" class="history-empty">暂无变更记录</div>
+          <div v-else class="history-list">
+            <div
+              v-for="history in taskHistories"
+              :key="history.id"
+              class="history-item"
+            >
+              <div class="history-dot"></div>
+              <div class="history-content">
+                <div class="history-text">
+                  <span class="history-operator">{{ getMemberName(history.operatorId) }}</span>
+                  将
+                  <span class="history-field">{{ getHistoryFieldLabel(history.field) }}</span>
+                  从
+                  <span class="history-old">{{ history.oldValue }}</span>
+                  修改为
+                  <span class="history-new">{{ history.newValue }}</span>
+                </div>
+                <div class="history-time">{{ new Date(history.createdAt).toLocaleString('zh-CN') }}</div>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
 
       <div class="modal-footer">
@@ -463,14 +504,56 @@ function getMemberName(memberId: string): string {
 }
 
 .member-selector {
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  max-height: 200px;
-  overflow-y: auto;
+  position: relative;
 }
 
-.member-list {
-  padding: 8px;
+.member-trigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: border-color var(--transition-fast);
+}
+
+.member-trigger:hover {
+  border-color: var(--color-primary);
+}
+
+.member-trigger-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.member-trigger-info span {
+  font-size: 14px;
+}
+
+.member-trigger-arrow {
+  transition: transform var(--transition-fast);
+  color: var(--color-text-muted);
+}
+
+.member-trigger-arrow.open {
+  transform: rotate(180deg);
+}
+
+.member-dropdown {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  max-height: 200px;
+  overflow-y: auto;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background-color: var(--color-bg-primary);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  z-index: 10;
+  padding: 4px;
 }
 
 .member-option {
@@ -587,5 +670,87 @@ function getMemberName(memberId: string): string {
 
 .btn-sm {
   padding: 4px 8px;
+}
+
+.history-empty {
+  text-align: center;
+  color: var(--color-text-muted);
+  padding: 32px 0;
+  font-size: 14px;
+}
+
+.history-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  position: relative;
+  padding-left: 20px;
+}
+
+.history-list::before {
+  content: '';
+  position: absolute;
+  left: 6px;
+  top: 8px;
+  bottom: 8px;
+  width: 2px;
+  background-color: var(--color-border);
+}
+
+.history-item {
+  display: flex;
+  gap: 12px;
+  position: relative;
+  padding: 8px 0;
+}
+
+.history-dot {
+  position: absolute;
+  left: -20px;
+  top: 14px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background-color: var(--color-primary);
+  border: 2px solid var(--color-bg-primary);
+  z-index: 1;
+}
+
+.history-content {
+  flex: 1;
+  padding: 8px 12px;
+  background-color: var(--color-bg-tertiary);
+  border-radius: var(--radius-md);
+}
+
+.history-text {
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--color-text-primary);
+}
+
+.history-operator {
+  font-weight: 600;
+  color: var(--color-primary);
+}
+
+.history-field {
+  font-weight: 500;
+}
+
+.history-old {
+  text-decoration: line-through;
+  color: var(--color-text-muted);
+}
+
+.history-new {
+  font-weight: 500;
+  color: var(--color-success, #22c55e);
+}
+
+.history-time {
+  font-size: 12px;
+  color: var(--color-text-muted);
+  margin-top: 4px;
 }
 </style>

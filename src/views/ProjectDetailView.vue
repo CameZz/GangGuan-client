@@ -2,7 +2,7 @@
 import { ref, computed, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import type { Project, Task } from '@/types'
-import { useProjectStore, useTaskStore, useMemberStore } from '@/stores'
+import { useProjectStore, useTaskStore, useMemberStore, useUserStore } from '@/stores'
 import ProjectModal from '@/components/project/ProjectModal.vue'
 import TaskCard from '@/components/task/TaskCard.vue'
 import TaskModalComponent from '@/components/task/TaskModal.vue'
@@ -14,6 +14,7 @@ const router = useRouter()
 const projectStore = useProjectStore()
 const taskStore = useTaskStore()
 const memberStore = useMemberStore()
+const userStore = useUserStore()
 
 const projectId = computed(() => route.params.id as string)
 
@@ -28,7 +29,8 @@ const projectTasks = computed(() => {
 const tasksByStatus = computed(() => ({
   todo: projectTasks.value.filter(t => t.status === 'todo'),
   inProgress: projectTasks.value.filter(t => t.status === 'in-progress'),
-  done: projectTasks.value.filter(t => t.status === 'done')
+  done: projectTasks.value.filter(t => t.status === 'done'),
+  abandoned: projectTasks.value.filter(t => t.status === 'abandoned')
 }))
 
 const assignedMemberIds = computed(() => {
@@ -48,6 +50,7 @@ const stats = computed(() => ({
   todo: tasksByStatus.value.todo.length,
   inProgress: tasksByStatus.value.inProgress.length,
   done: tasksByStatus.value.done.length,
+  abandoned: tasksByStatus.value.abandoned.length,
   completion: projectTasks.value.length > 0
     ? Math.round((tasksByStatus.value.done.length / projectTasks.value.length) * 100)
     : 0
@@ -100,7 +103,7 @@ function handleProjectDelete() {
 
 function handleTaskSave(taskData: Partial<Task>) {
   if (selectedTask.value) {
-    taskStore.updateTask(selectedTask.value.id, taskData)
+    taskStore.updateTask(selectedTask.value.id, taskData, userStore.currentUser?.id)
   } else {
     taskStore.createTask({
       title: taskData.title || '',

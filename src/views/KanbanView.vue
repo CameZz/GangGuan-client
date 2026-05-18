@@ -1,16 +1,16 @@
 <script setup lang="ts">
 import { ref, computed, watchEffect } from 'vue'
 import { useRoute } from 'vue-router'
-import type { Task, TaskStatus, TaskPriority } from '@/types'
-import { useTaskStore, useProjectStore } from '@/stores'
+import type { Task, TaskStage, TaskStatus, TaskPriority } from '@/types'
+import { useTaskStore, useProjectStore, useUserStore } from '@/stores'
 import TaskCard from '@/components/task/TaskCard.vue'
 import TaskModal from '@/components/task/TaskModal.vue'
 import TaskFilter from '@/components/task/TaskFilter.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
 
 interface TaskFilters {
-  projectId?: string
   status?: TaskStatus
+  stage?: TaskStage
   priority?: TaskPriority
   assigneeId?: string | null
 }
@@ -18,10 +18,10 @@ interface TaskFilters {
 const route = useRoute()
 const taskStore = useTaskStore()
 const projectStore = useProjectStore()
+const userStore = useUserStore()
 
 const filters = ref<TaskFilters>({
-  projectId: undefined,
-  status: undefined,
+  stage: undefined,
   priority: undefined,
   assigneeId: undefined
 })
@@ -30,6 +30,7 @@ const selectedPlanningId = computed(() => projectStore.selectedPlanningId)
 
 const isModalOpen = ref(false)
 const selectedTask = ref<Task | null>(null)
+const showAbandoned = ref(false)
 
 // Sync projectId from route (only when it changes)
 watchEffect(() => {
@@ -37,7 +38,6 @@ watchEffect(() => {
   if (projectId && projectStore.currentProjectId !== projectId) {
     projectStore.setCurrentProject(projectId)
   }
-  filters.value.projectId = projectId || ''
 })
 
 // Sync planningId from route (only when it changes)
@@ -48,15 +48,36 @@ watchEffect(() => {
   }
 })
 
-const columns = computed(() => [
-  { id: 'todo', title: '待办', tasks: filteredTasks.value.filter(t => t.status === 'todo') },
-  { id: 'in-progress', title: '进行中', tasks: filteredTasks.value.filter(t => t.status === 'in-progress') },
-  { id: 'done', title: '已完成', tasks: filteredTasks.value.filter(t => t.status === 'done') }
-])
+const columns = computed(() => {
+  const cols = [
+    { id: 'todo', title: '待办', tasks: filteredTasks.value.filter(t => t.status === 'todo') },
+    { id: 'in-progress', title: '进行中', tasks: filteredTasks.value.filter(t => t.status === 'in-progress') },
+    { id: 'done', title: '已完成', tasks: filteredTasks.value.filter(t => t.status === 'done') }
+  ]
+  if (showAbandoned.value) {
+    cols.push({ id: 'abandoned', title: '已废弃', tasks: filteredTasks.value.filter(t => t.status === 'abandoned') })
+  }
+  return cols
+})
+
+const abandonedCount = computed(() => {
+  const projectId = projectStore.currentProjectId
+  const planningId = selectedPlanningId.value
+  let tasks = taskStore.tasks.filter(t => t.status === 'abandoned')
+  if (projectId) {
+    tasks = tasks.filter(t => t.projectId === projectId)
+  }
+  if (planningId) {
+    tasks = tasks.filter(t => t.planningId === planningId)
+  }
+  return tasks.length
+})
 
 const filteredTasks = computed(() => {
-  const projectId = filters.value.projectId
+  const projectId = projectStore.currentProjectId
   const planningId = selectedPlanningId.value
+  const stage = filters.value.stage
+  const status = filters.value.status
 
   // 先按项目过滤
   let tasks = taskStore.tasks
@@ -69,12 +90,22 @@ const filteredTasks = computed(() => {
     tasks = tasks.filter(t => t.planningId === planningId)
   }
 
-  return tasks
-})
+  // 按状态过滤
+  if (status) {
+    tasks = tasks.filter(t => t.status === status)
+  }
 
-const currentProject = computed(() => {
-  if (!filters.value.projectId) return null
-  return projectStore.projects.find(p => p.id === filters.value.projectId)
+  // 按阶段过滤
+  if (stage) {
+    tasks = tasks.filter(t => t.stage === stage)
+  }
+
+  // 默认隐藏废弃任务
+  if (!showAbandoned.value) {
+    tasks = tasks.filter(t => t.status !== 'abandoned')
+  }
+
+  return tasks
 })
 
 function handleFilter(newFilters: TaskFilters) {
@@ -98,7 +129,7 @@ function closeModal() {
 
 function handleSave(taskData: Partial<Task>) {
   if (selectedTask.value) {
-    taskStore.updateTask(selectedTask.value.id, taskData)
+    taskStore.updateTask(selectedTask.value.id, taskData, userStore.currentUser?.id)
   } else {
     taskStore.createTask({
       title: taskData.title || '',
@@ -106,7 +137,7 @@ function handleSave(taskData: Partial<Task>) {
       status: taskData.status || 'todo',
       priority: taskData.priority || 'medium',
       dueDate: taskData.dueDate || null,
-      projectId: taskData.projectId || filters.value.projectId || '',
+      projectId: taskData.projectId || projectStore.currentProjectId || '',
       assigneeId: taskData.assigneeId || null,
       stage: taskData.stage || 'filed',
       planningId: taskData.planningId || null,
@@ -131,7 +162,7 @@ function handleDrop(e: DragEvent, status: TaskStatus) {
   e.preventDefault()
   const taskId = e.dataTransfer?.getData('text/plain')
   if (taskId) {
-    taskStore.moveTask(taskId, status)
+    taskStore.moveTask(taskId, status, userStore.currentUser?.id)
   }
 }
 </script>
@@ -141,6 +172,10 @@ function handleDrop(e: DragEvent, status: TaskStatus) {
     <div class="page-header">
       <div class="header-content">
       </div>
+      <label class="abandoned-toggle">
+        <input type="checkbox" v-model="showAbandoned" :disabled="abandonedCount === 0" />
+        <span>显示废弃任务({{ abandonedCount }})</span>
+      </label>
       <button class="btn btn-primary" @click="openNewTaskModal">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <path d="M12 5v14M5 12h14" />
@@ -149,9 +184,9 @@ function handleDrop(e: DragEvent, status: TaskStatus) {
       </button>
     </div>
 
-    <TaskFilter :project-id="filters.projectId" @filter="handleFilter" />
+    <TaskFilter @filter="handleFilter" />
 
-    <div v-if="filteredTasks.length > 0" class="kanban-board">
+    <div v-if="filteredTasks.length > 0" class="kanban-board" :class="{ 'show-abandoned': showAbandoned }">
       <div
         v-for="column in columns"
         :key="column.id"
@@ -202,12 +237,40 @@ function handleDrop(e: DragEvent, status: TaskStatus) {
 .page-header {
   display: flex;
   justify-content: space-between;
-  align-items: flex-start;
+  align-items: center;
   margin-bottom: 24px;
 }
 
 .header-content {
   flex: 1;
+}
+
+.abandoned-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-right: 16px;
+  font-size: 14px;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  white-space: nowrap;
+  height: 36px;
+}
+
+.abandoned-toggle input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+  accent-color: var(--color-primary);
+}
+
+.abandoned-toggle input[type="checkbox"]:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.abandoned-toggle input[type="checkbox"]:disabled + span {
+  opacity: 0.5;
 }
 
 .page-subtitle {
@@ -222,6 +285,10 @@ function handleDrop(e: DragEvent, status: TaskStatus) {
   gap: 16px;
   flex: 1;
   min-height: 0;
+}
+
+.kanban-board.show-abandoned {
+  grid-template-columns: repeat(4, 1fr);
 }
 
 .kanban-column {

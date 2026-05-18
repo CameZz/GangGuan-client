@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import type { Task } from '@/types'
+import { TASK_STAGES } from '@/types'
 import { useMemberStore } from '@/stores'
 import MemberAvatar from '@/components/member/MemberAvatar.vue'
 
@@ -26,12 +27,17 @@ const priorityLabel = computed(() => {
 })
 
 const statusLabel = computed(() => {
-  const labels: Record<string, string> = { 'todo': '待办', 'in-progress': '进行中', 'done': '已完成' }
+  const labels: Record<string, string> = { 'todo': '待办', 'in-progress': '进行中', 'done': '已完成', 'abandoned': '已废弃' }
   return labels[props.task.status] || props.task.status
 })
 
 const priorityClass = computed(() => `badge-${props.task.priority}`)
 const statusClass = computed(() => `badge-${props.task.status}`)
+
+const stageLabel = computed(() => {
+  const stage = TASK_STAGES.find(s => s.value === props.task.stage)
+  return stage?.label || props.task.stage
+})
 
 const formattedDueDate = computed(() => {
   if (!props.task.dueDate) return null
@@ -40,7 +46,7 @@ const formattedDueDate = computed(() => {
 })
 
 const isOverdue = computed(() => {
-  if (!props.task.dueDate || props.task.status === 'done') return false
+  if (!props.task.dueDate || props.task.status === 'done' || props.task.status === 'abandoned') return false
   return new Date(props.task.dueDate) < new Date()
 })
 
@@ -54,7 +60,7 @@ function handleDragStart(e: DragEvent) {
   <div class="task-card" draggable="true" @click="emit('click')" @dragstart="handleDragStart">
     <div class="task-header">
       <span class="badge" :class="priorityClass">{{ priorityLabel }}</span>
-      <span class="badge" :class="statusClass">{{ statusLabel }}</span>
+      <span class="task-stage">{{ stageLabel }}</span>
     </div>
     <h4 class="task-title">{{ task.title }}</h4>
     <p v-if="task.description" class="task-description">{{ task.description }}</p>
@@ -92,8 +98,17 @@ function handleDragStart(e: DragEvent) {
 
 .task-header {
   display: flex;
-  gap: 6px;
+  justify-content: space-between;
+  align-items: center;
   margin-bottom: 8px;
+}
+
+.task-stage {
+  font-size: 11px;
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  background-color: var(--color-bg-tertiary);
+  color: var(--color-text-secondary);
 }
 
 .task-title {

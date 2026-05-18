@@ -4,6 +4,7 @@ import type {
     Project,
     Task,
     TaskStatus,
+    TaskHistory,
     Planning,
     User,
 } from "@/types";
@@ -726,6 +727,7 @@ let projects: Project[] = [...mockProjects];
 let plannings: Planning[] = [...mockPlannings];
 let tasks: Task[] = [...mockTasks];
 let users: User[] = [...mockUsers];
+let taskHistories: TaskHistory[] = [];
 
 // Event handlers
 type MockEventHandler = (data: any) => void;
@@ -888,6 +890,23 @@ export const mockApi = {
         return true;
     },
 
+    // Task History
+    getTaskHistories: (taskId: string): TaskHistory[] =>
+        taskHistories.filter((h) => h.taskId === taskId).sort((a, b) =>
+            new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+        ),
+
+    addTaskHistory: (entry: Omit<TaskHistory, "id" | "createdAt">): TaskHistory => {
+        const history: TaskHistory = {
+            ...entry,
+            id: generateId(),
+            createdAt: new Date().toISOString(),
+        };
+        taskHistories.push(history);
+        trigger("task:history:add", history);
+        return history;
+    },
+
     // Events
     on: (type: string, handler: MockEventHandler): void => {
         if (!eventHandlers.has(type)) {
@@ -914,6 +933,7 @@ export const mockApi = {
         plannings = [...mockPlannings];
         tasks = [...mockTasks];
         users = [...mockUsers];
+        taskHistories = [];
     },
 };
 

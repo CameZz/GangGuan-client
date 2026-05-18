@@ -86,7 +86,7 @@ function getMemberOverdueCount(userId: string): number {
   return tasks.filter(t => {
     const isParticipant = t.assigneeId === userId || t.participants.some(p => p.memberId === userId)
     if (!isParticipant) return false
-    if (t.status === 'done') return false
+    if (t.status === 'done' || t.status === 'abandoned') return false
     if (!t.dueDate) return false
     return new Date(t.dueDate) < now
   }).length

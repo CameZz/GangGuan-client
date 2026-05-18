@@ -180,6 +180,11 @@ body {
   color: #166534;
 }
 
+.badge-abandoned {
+  background-color: #f3f4f6;
+  color: #6b7280;
+}
+
 .badge-low {
   background-color: #f1f5f9;
   color: #475569;

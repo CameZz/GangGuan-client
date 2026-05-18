@@ -1,6 +1,6 @@
 // Type definitions for the project management system
 
-export type TaskStatus = 'todo' | 'in-progress' | 'done'
+export type TaskStatus = 'todo' | 'in-progress' | 'done' | 'abandoned'
 export type TaskPriority = 'low' | 'medium' | 'high'
 
 // Role types
@@ -91,6 +91,46 @@ export interface Comment {
   authorId: string
   content: string
   createdAt: string
+}
+
+export interface TaskHistory {
+  id: string
+  taskId: string
+  operatorId: string
+  field: string
+  oldValue: string
+  newValue: string
+  createdAt: string
+}
+
+export const HISTORY_FIELD_LABELS: Record<string, string> = {
+  status: '状态',
+  priority: '优先级',
+  stage: '任务阶段',
+  assigneeId: '负责人',
+  dueDate: '截止日期',
+  title: '标题',
+  description: '描述'
+}
+
+export function formatHistoryValue(field: string, value: string): string {
+  if (!value) return '空'
+  if (field === 'status') {
+    const map: Record<string, string> = { 'todo': '待办', 'in-progress': '进行中', 'done': '已完成', 'abandoned': '已废弃' }
+    return map[value] || value
+  }
+  if (field === 'priority') {
+    const map: Record<string, string> = { 'low': '低', 'medium': '中', 'high': '高' }
+    return map[value] || value
+  }
+  if (field === 'stage') {
+    const stage = TASK_STAGES.find(s => s.value === value)
+    return stage?.label || value
+  }
+  if (field === 'dueDate') {
+    return value === '空' ? '空' : new Date(value).toLocaleDateString('zh-CN')
+  }
+  return value
 }
 
 export interface Task {

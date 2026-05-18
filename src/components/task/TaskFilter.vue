@@ -1,31 +1,25 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
-import type { TaskStatus, TaskPriority } from '@/types'
-import { useProjectStore, useMemberStore } from '@/stores'
-
-const props = defineProps<{
-  projectId?: string
-}>()
+import type { TaskStatus, TaskStage, TaskPriority } from '@/types'
+import { TASK_STAGES } from '@/types'
+import { useMemberStore } from '@/stores'
 
 const emit = defineEmits<{
   filter: [filters: TaskFilters]
 }>()
 
 interface TaskFilters {
-  projectId?: string
   status?: TaskStatus
+  stage?: TaskStage
   priority?: TaskPriority
   assigneeId?: string | null
 }
 
-const projectStore = useProjectStore()
 const memberStore = useMemberStore()
-
-const projects = computed(() => projectStore.projects)
 const members = computed(() => memberStore.members)
 
-const selectedProjectId = ref(props.projectId || '')
 const selectedStatus = ref<TaskStatus | ''>('')
+const selectedStage = ref<TaskStage | ''>('')
 const selectedPriority = ref<TaskPriority | ''>('')
 const selectedAssigneeId = ref<string | null>(null)
 
@@ -33,7 +27,13 @@ const statusOptions = [
   { value: '', label: '全部状态' },
   { value: 'todo', label: '待办' },
   { value: 'in-progress', label: '进行中' },
-  { value: 'done', label: '已完成' }
+  { value: 'done', label: '已完成' },
+  { value: 'abandoned', label: '已废弃' }
+]
+
+const stageOptions = [
+  { value: '', label: '全部阶段' },
+  ...TASK_STAGES.map(s => ({ value: s.value, label: s.label }))
 ]
 
 const priorityOptions = [
@@ -43,43 +43,38 @@ const priorityOptions = [
   { value: 'high', label: '高' }
 ]
 
-watch([selectedProjectId, selectedStatus, selectedPriority, selectedAssigneeId], () => {
+watch([selectedStatus, selectedStage, selectedPriority, selectedAssigneeId], () => {
   emit('filter', {
-    projectId: selectedProjectId.value || undefined,
     status: selectedStatus.value as TaskStatus || undefined,
+    stage: selectedStage.value as TaskStage || undefined,
     priority: selectedPriority.value as TaskPriority || undefined,
     assigneeId: selectedAssigneeId.value
   })
 }, { immediate: true })
 
-watch(() => props.projectId, (newId) => {
-  selectedProjectId.value = newId || ''
-})
-
 function clearFilters() {
-  selectedProjectId.value = ''
   selectedStatus.value = ''
+  selectedStage.value = ''
   selectedPriority.value = ''
   selectedAssigneeId.value = null
 }
 
 const hasActiveFilters = computed(() => {
-  return selectedProjectId.value || selectedStatus.value || selectedPriority.value || selectedAssigneeId.value !== null
+  return selectedStatus.value || selectedStage.value || selectedPriority.value || selectedAssigneeId.value !== null
 })
 </script>
 
 <template>
   <div class="task-filter">
     <div class="filter-row">
-      <select v-model="selectedProjectId" class="input select filter-select">
-        <option value="">全部项目</option>
-        <option v-for="project in projects" :key="project.id" :value="project.id">
-          {{ project.name }}
+      <select v-model="selectedStatus" class="input select filter-select">
+        <option v-for="opt in statusOptions" :key="opt.value" :value="opt.value">
+          {{ opt.label }}
         </option>
       </select>
 
-      <select v-model="selectedStatus" class="input select filter-select">
-        <option v-for="opt in statusOptions" :key="opt.value" :value="opt.value">
+      <select v-model="selectedStage" class="input select filter-select">
+        <option v-for="opt in stageOptions" :key="opt.value" :value="opt.value">
           {{ opt.label }}
         </option>
       </select>
