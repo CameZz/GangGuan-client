@@ -1,0 +1,22 @@
+schema: spec-driven
+
+context: |
+  技术栈: TypeScript, Vue.js, Node.js, WebSockets
+  项目名称：刚男工作室项目管理系统
+  开发规范：统一使用ESLint+Prettier格式化
+  编码风格：简洁易维护，注释清晰
+  项目定位：业务功能优先，兼顾扩展性
+
+rules:
+  proposal:
+    - 提案字数请控制在500字以内。
+  tasks:
+    - 将任务分解成最多 1 小时的小块。
+  specs:
+    - 每个规范都应包含以下字段：
+      - 目的：规范的目标和预期结果。
+      - 输入：规范所需的输入数据或条件。
+      - 输出：规范执行后的预期输出或结果。
+      - 验证方法：验证规范是否成功的方法或步骤。
+
+workflow: standard
