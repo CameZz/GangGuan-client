@@ -84,6 +84,18 @@ const routes: RouteRecordRaw[] = [
     meta: { requiresAuth: true, requiresProject: true }
   },
   {
+    path: '/member-schedule',
+    name: 'MemberSchedule',
+    component: () => import('@/views/MemberScheduleView.vue'),
+    meta: { requiresAuth: true }
+  },
+  {
+    path: '/member-schedule/:projectId',
+    name: 'ProjectMemberSchedule',
+    component: () => import('@/views/MemberScheduleView.vue'),
+    meta: { requiresAuth: true, requiresProject: true }
+  },
+  {
     path: '/profile',
     name: 'Profile',
     component: () => import('@/views/ProfileView.vue'),

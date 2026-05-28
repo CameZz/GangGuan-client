@@ -2,7 +2,30 @@
   "permissions": {
     "allow": [
       "Bash(npm run *)",
-      "Bash(npx vue-tsc *)"
+      "Bash(npx vue-tsc *)",
+      "Bash(openspec instructions:)",
+      "Bash(openspec status:*)",
+      "Bash(openspec instructions:*)",
+      "Bash(mkdir -p openspec/changes/archive)",
+      "Bash(mv openspec/changes/iteration-timeline-view openspec/changes/archive/2026-05-18-iteration-timeline-view)",
+      "Bash(cp -r openspec/changes/timeline-workday-config openspec/changes/archive/2026-05-18-timeline-workday-config)",
+      "Bash(rm -rf openspec/changes/timeline-workday-config)",
+      "Bash(openspec list:*)",
+      "mcp__codegraph__codegraph_files",
+      "Bash(openspec new *)",
+      "Bash(mkdir -p openspec/specs/__TRACKED_VAR__)",
+      "Bash(cp openspec/changes/__TRACKED_VAR__/specs/__TRACKED_VAR__/spec.md openspec/specs/__TRACKED_VAR__/spec.md)",
+      "Bash(cp -r openspec/changes/__TRACKED_VAR__ openspec/changes/archive/2026-05-28-__TRACKED_VAR__)",
+      "Bash(rm -rf openspec/changes/__TRACKED_VAR__)",
+      "Bash(npx vite *)",
+      "Bash(curl -s http://localhost:5173)",
+      "Bash(node -e ' *)",
+      "Bash(npx playwright *)",
+      "mcp__codegraph__codegraph_context",
+      "mcp__codegraph__codegraph_explore",
+      "Bash(git fsck *)",
+      "mcp__codegraph__codegraph_node",
+      "Bash(python *)"
     ]
   }
 }

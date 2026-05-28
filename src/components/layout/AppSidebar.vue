@@ -105,7 +105,9 @@ function createPlanning() {
   const planning = planningStore.createPlanning({
     name: newPlanningName.value.trim(),
     deadline: newPlanningDeadline.value ? new Date(newPlanningDeadline.value).toISOString() : null,
-    projectId: currentProject.value.id
+    projectId: currentProject.value.id,
+    nonWorkdays: [],
+    extraWorkdays: []
   })
 
   // Reset form

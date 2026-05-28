@@ -283,6 +283,8 @@ const mockPlannings: Planning[] = [
         deadline: "2024-02-15T00:00:00Z",
         projectId: "proj-1",
         createdAt: "2024-01-15T10:00:00Z",
+        nonWorkdays: [],
+        extraWorkdays: [],
     },
     {
         id: "plan-2",
@@ -290,6 +292,8 @@ const mockPlannings: Planning[] = [
         deadline: "2024-04-01T00:00:00Z",
         projectId: "proj-1",
         createdAt: "2024-02-01T09:00:00Z",
+        nonWorkdays: [],
+        extraWorkdays: [],
     },
     {
         id: "plan-3",
@@ -297,6 +301,8 @@ const mockPlannings: Planning[] = [
         deadline: "2024-05-15T00:00:00Z",
         projectId: "proj-1",
         createdAt: "2024-03-01T10:00:00Z",
+        nonWorkdays: [],
+        extraWorkdays: [],
     },
     {
         id: "plan-4",
@@ -304,6 +310,8 @@ const mockPlannings: Planning[] = [
         deadline: "2024-06-01T00:00:00Z",
         projectId: "proj-1",
         createdAt: "2024-04-01T09:00:00Z",
+        nonWorkdays: [],
+        extraWorkdays: [],
     },
     // 英勇之地端游 (proj-2) 迭代
     {
@@ -312,6 +320,8 @@ const mockPlannings: Planning[] = [
         deadline: "2024-03-01T00:00:00Z",
         projectId: "proj-2",
         createdAt: "2024-01-20T08:00:00Z",
+        nonWorkdays: [],
+        extraWorkdays: [],
     },
     {
         id: "plan-6",
@@ -319,6 +329,8 @@ const mockPlannings: Planning[] = [
         deadline: "2024-05-01T00:00:00Z",
         projectId: "proj-2",
         createdAt: "2024-03-01T08:00:00Z",
+        nonWorkdays: [],
+        extraWorkdays: [],
     },
     {
         id: "plan-7",
@@ -326,6 +338,8 @@ const mockPlannings: Planning[] = [
         deadline: "2024-07-01T00:00:00Z",
         projectId: "proj-2",
         createdAt: "2024-05-01T09:00:00Z",
+        nonWorkdays: [],
+        extraWorkdays: [],
     },
 ];
 

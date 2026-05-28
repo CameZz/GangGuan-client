@@ -49,6 +49,7 @@ function getNavLink(path: string): string {
         <router-link :to="getNavLink('/kanban')" class="nav-link">看板</router-link>
         <router-link :to="getNavLink('/list')" class="nav-link">列表</router-link>
         <router-link :to="getNavLink('/timeline')" class="nav-link">时间轴</router-link>
+        <router-link :to="getNavLink('/member-schedule')" class="nav-link">成员排期</router-link>
         <router-link :to="getNavLink('/members')" class="nav-link">成员</router-link>
         <router-link v-if="isAdmin" to="/admin" class="nav-link">管理</router-link>
       </nav>
