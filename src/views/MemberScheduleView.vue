@@ -223,6 +223,23 @@ const getSlotIndex = (timestamp: string): number => {
   return daysDiff * 2 + slotInDay
 }
 
+// Clamp to nearest visible day
+const clampToVisible = (dayIndex: number, direction: 'forward' | 'backward'): number | undefined => {
+  const map = dayIndexToVisibleCol.value!
+  if (map.has(dayIndex)) return map.get(dayIndex)
+  const totalDays = daySlots.value.length
+  if (direction === 'forward') {
+    for (let d = dayIndex + 1; d < totalDays; d++) {
+      if (map.has(d)) return map.get(d)
+    }
+  } else {
+    for (let d = dayIndex - 1; d >= 0; d--) {
+      if (map.has(d)) return map.get(d)
+    }
+  }
+  return undefined
+}
+
 // Bar style for a task participant
 const getBarStyle = (item: MemberTaskItem) => {
   const startTime = item.participant.startTime
@@ -237,8 +254,8 @@ const getBarStyle = (item: MemberTaskItem) => {
     const startHalf = startSlot % 2
     const endDay = Math.floor((endSlot - 1) / 2)
     const endHalf = (endSlot - 1) % 2
-    const visStartDay = dayIndexToVisibleCol.value.get(startDay)
-    const visEndDay = dayIndexToVisibleCol.value.get(endDay)
+    const visStartDay = clampToVisible(startDay, 'forward')
+    const visEndDay = clampToVisible(endDay, 'backward')
     if (visStartDay === undefined || visEndDay === undefined) return { display: 'none' }
     return {
       gridColumn: `${visStartDay * 2 + startHalf + 1} / ${visEndDay * 2 + endHalf + 2}`,
@@ -737,8 +754,8 @@ const activePlannings = computed(() => {
 }
 
 .date-label.non-workday {
-  background-color: #f3f4f6;
-  color: #9ca3af;
+  background-color: #e5e7eb;
+  color: #6b7280;
 }
 
 .date-label.can-edit {
@@ -779,8 +796,7 @@ const activePlannings = computed(() => {
 }
 
 .non-workday-cell {
-  background-color: #f9fafb;
-  opacity: 0.5;
+  background-color: #e5e7eb;
 }
 
 /* Task bars */

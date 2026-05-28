@@ -25,7 +25,8 @@
       "mcp__codegraph__codegraph_explore",
       "Bash(git fsck *)",
       "mcp__codegraph__codegraph_node",
-      "Bash(python *)"
+      "Bash(python *)",
+      "Bash(grep -v \"^--$\")"
     ]
   }
 }

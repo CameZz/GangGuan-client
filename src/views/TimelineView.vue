@@ -109,6 +109,18 @@ const filteredTasks = computed(() => {
     result = result.filter(t => t.priority === filterPriority.value)
   }
 
+  // Filter out tasks with no participants in the visible time range
+  const rangeStart = timelineStart.value.getTime()
+  const rangeEnd = timelineEnd.value.getTime() + 24 * 60 * 60 * 1000
+  result = result.filter(t =>
+    t.participants.some(p => {
+      if (!p.startTime) return false
+      const pStart = new Date(p.startTime).getTime()
+      const pEnd = p.endTime ? new Date(p.endTime).getTime() : pStart + 24 * 60 * 60 * 1000
+      return pEnd >= rangeStart && pStart < rangeEnd
+    })
+  )
+
   return result
 })
 
@@ -119,8 +131,25 @@ const getSlotIndex = (timestamp: string): number => {
   const daysDiff = (time - start) / (24 * 60 * 60 * 1000)
   const dayIndex = Math.floor(daysDiff)
   const hourOfDay = new Date(timestamp).getHours()
-  const slotInDay = Math.floor(hourOfDay / 6) // 0-3
-  return dayIndex * 4 + slotInDay
+  const slotInDay = Math.floor(hourOfDay / 12) // 0: 上午, 1: 下午
+  return dayIndex * 2 + slotInDay
+}
+
+// Clamp to nearest visible day
+const clampToVisible = (dayIndex: number, direction: 'forward' | 'backward'): number | undefined => {
+  const map = dayIndexToVisibleCol.value!
+  if (map.has(dayIndex)) return map.get(dayIndex)
+  const totalDays = daySlots.value.length
+  if (direction === 'forward') {
+    for (let d = dayIndex + 1; d < totalDays; d++) {
+      if (map.has(d)) return map.get(d)
+    }
+  } else {
+    for (let d = dayIndex - 1; d >= 0; d--) {
+      if (map.has(d)) return map.get(d)
+    }
+  }
+  return undefined
 }
 
 // Get bar style for a participant
@@ -131,15 +160,15 @@ const getBarStyle = (startTime: string | null, endTime: string | null) => {
   const endSlot = endTime ? getSlotIndex(endTime) + 1 : startSlot + 1
 
   if (dayIndexToVisibleCol.value) {
-    const startDay = Math.floor(startSlot / 4)
-    const startSub = startSlot % 4
-    const endDay = Math.floor((endSlot - 1) / 4)
-    const endSub = (endSlot - 1) % 4
-    const visStartDay = dayIndexToVisibleCol.value.get(startDay)
-    const visEndDay = dayIndexToVisibleCol.value.get(endDay)
+    const startDay = Math.floor(startSlot / 2)
+    const startSub = startSlot % 2
+    const endDay = Math.floor((endSlot - 1) / 2)
+    const endSub = (endSlot - 1) % 2
+    const visStartDay = clampToVisible(startDay, 'forward')
+    const visEndDay = clampToVisible(endDay, 'backward')
     if (visStartDay === undefined || visEndDay === undefined) return { display: 'none' }
     return {
-      gridColumn: `${visStartDay * 4 + startSub + 1} / ${visEndDay * 4 + endSub + 2}`
+      gridColumn: `${visStartDay * 2 + startSub + 1} / ${visEndDay * 2 + endSub + 2}`
     }
   }
 
@@ -244,7 +273,7 @@ const visibleDaySlots = computed(() => {
   return daySlots.value.filter(day => isWorkday(day.date))
 })
 
-const visibleTotalSlots = computed(() => visibleDaySlots.value.length * 4)
+const visibleTotalSlots = computed(() => visibleDaySlots.value.length * 2)
 
 const dayIndexToVisibleCol = computed(() => {
   if (!collapseRestDays.value) return null
@@ -299,7 +328,7 @@ const dayIndexToVisibleCol = computed(() => {
         <!-- Header row (sticky top) -->
         <div class="timeline-row timeline-row--header">
           <div class="task-info task-info--header">任务</div>
-          <div class="timeline-grid-header" :style="{ gridTemplateColumns: `repeat(${visibleTotalSlots}, 48px)` }">
+          <div class="timeline-grid-header" :style="{ gridTemplateColumns: `repeat(${visibleTotalSlots}, 100px)` }">
             <template v-for="(day, vi) in visibleDaySlots" :key="day.dayIndex">
               <div
                 class="date-label"
@@ -307,7 +336,7 @@ const dayIndexToVisibleCol = computed(() => {
                   'non-workday': !isWorkday(day.date),
                   'can-edit': canEditWorkday
                 }"
-                :style="{ gridColumn: `${vi * 4 + 1} / ${vi * 4 + 5}` }"
+                :style="{ gridColumn: `${vi * 2 + 1} / ${vi * 2 + 3}` }"
                 @click="canEditWorkday ? toggleWorkday(day.date) : undefined"
               >
                 {{ day.dateStr }}
@@ -330,13 +359,13 @@ const dayIndexToVisibleCol = computed(() => {
             </div>
           </div>
 
-          <div class="task-grid" :style="{ gridTemplateColumns: `repeat(${visibleTotalSlots}, 48px)` }">
+          <div class="task-grid" :style="{ gridTemplateColumns: `repeat(${visibleTotalSlots}, 100px)` }">
             <div
               v-for="(day, vi) in visibleDaySlots"
               :key="day.dayIndex"
               class="grid-cell day-start"
               :class="{ 'non-workday-cell': !isWorkday(day.date) }"
-              :style="{ gridColumn: `${vi * 4 + 1} / ${vi * 4 + 5}` }"
+              :style="{ gridColumn: `${vi * 2 + 1} / ${vi * 2 + 3}` }"
             ></div>
 
             <div
@@ -518,8 +547,8 @@ const dayIndexToVisibleCol = computed(() => {
 }
 
 .date-label.non-workday {
-  background-color: #f3f4f6;
-  color: #9ca3af;
+  background-color: #e5e7eb;
+  color: #6b7280;
 }
 
 .rest-badge {
@@ -531,8 +560,7 @@ const dayIndexToVisibleCol = computed(() => {
 }
 
 .non-workday-cell {
-  background-color: #f9fafb;
-  opacity: 0.5;
+  background-color: #e5e7eb;
 }
 
 .task-title {
