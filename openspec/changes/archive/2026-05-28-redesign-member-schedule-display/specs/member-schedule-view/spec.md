@@ -1,15 +1,4 @@
-## ADDED Requirements
-
-### Requirement: 成员排期表页面路由与导航
-系统 SHALL 提供独立的成员排期表页面，路由为 `/project/:projectId/member-schedule`，侧边栏在"时间轴"下方显示入口。
-
-#### Scenario: 从侧边栏进入成员排期表
-- **WHEN** 用户点击侧边栏"成员排期表"菜单项
-- **THEN** 页面跳转到 `/project/:projectId/member-schedule`，显示当前项目的成员排期表
-
-#### Scenario: 直接访问成员排期表路由
-- **WHEN** 用户直接访问 `/project/:projectId/member-schedule`
-- **THEN** 页面加载并显示该项目的成员排期表，时间轴范围取自当前选中的 Planning
+## MODIFIED Requirements
 
 ### Requirement: 成员-时间网格布局
 页面 SHALL 以成员为纵轴、时间为横轴显示表格。左侧固定列显示成员信息，右侧为可横向滚动的时间表格，每天分为上午和下午两个单元格。
@@ -51,21 +40,3 @@
 #### Scenario: 不同迭代任务时间重叠
 - **WHEN** 成员 A 在同一时段有迭代 1 和迭代 2 的任务
 - **THEN** 先开始的任务实色显示，后开始的任务半透明 + 描边显示，描边颜色与该任务迭代颜色一致
-
-### Requirement: 筛选器
-页面 SHALL 提供任务阶段和优先级筛选器，与现有时间轴页面一致。
-
-#### Scenario: 按阶段筛选
-- **WHEN** 用户选择某个任务阶段
-- **THEN** 仅显示该阶段的任务条，成员行仍保留但无任务的行内容为空
-
-#### Scenario: 按优先级筛选
-- **WHEN** 用户选择某个优先级
-- **THEN** 仅显示该优先级的任务条
-
-### Requirement: 迭代颜色图例
-页面 SHALL 在底部显示迭代颜色图例，标明每个颜色对应的迭代名称。
-
-#### Scenario: 多个迭代时显示图例
-- **WHEN** 当前项目有多个迭代包含任务
-- **THEN** 底部图例显示每个迭代的颜色块和名称

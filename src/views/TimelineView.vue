@@ -89,8 +89,6 @@ const daySlots = computed<DaySlot[]>(() => {
   return days
 })
 
-const totalSlots = computed(() => daySlots.value.length * 4)
-
 // Filtered tasks
 const filteredTasks = computed(() => {
   let result = tasks.value
@@ -132,11 +130,21 @@ const getBarStyle = (startTime: string | null, endTime: string | null) => {
   const startSlot = getSlotIndex(startTime)
   const endSlot = endTime ? getSlotIndex(endTime) + 1 : startSlot + 1
 
-  const gridColumnStart = startSlot + 1 // CSS grid is 1-based
-  const gridColumnEnd = endSlot + 1
+  if (dayIndexToVisibleCol.value) {
+    const startDay = Math.floor(startSlot / 4)
+    const startSub = startSlot % 4
+    const endDay = Math.floor((endSlot - 1) / 4)
+    const endSub = (endSlot - 1) % 4
+    const visStartDay = dayIndexToVisibleCol.value.get(startDay)
+    const visEndDay = dayIndexToVisibleCol.value.get(endDay)
+    if (visStartDay === undefined || visEndDay === undefined) return { display: 'none' }
+    return {
+      gridColumn: `${visStartDay * 4 + startSub + 1} / ${visEndDay * 4 + endSub + 2}`
+    }
+  }
 
   return {
-    gridColumn: `${gridColumnStart} / ${gridColumnEnd}`
+    gridColumn: `${startSlot + 1} / ${endSlot + 1}`
   }
 }
 
@@ -191,23 +199,23 @@ const formatDateKey = (date: Date): string => {
 
 const isWorkday = (date: Date): boolean => {
   const key = formatDateKey(date)
-  const planning = selectedPlanning.value
-  if (planning?.nonWorkdays?.includes(key)) return false
-  if (planning?.extraWorkdays?.includes(key)) return true
+  const project = projectStore.currentProject
+  if (project?.nonWorkdays?.includes(key)) return false
+  if (project?.extraWorkdays?.includes(key)) return true
   const day = date.getDay()
   return day >= 1 && day <= 5
 }
 
 const toggleWorkday = (date: Date) => {
-  const planning = selectedPlanning.value
-  if (!planning) return
+  const project = projectStore.currentProject
+  if (!project) return
 
   const key = formatDateKey(date)
   const day = date.getDay()
   const isDefaultWorkday = day >= 1 && day <= 5
 
-  const nonWorkdays = [...(planning.nonWorkdays || [])]
-  const extraWorkdays = [...(planning.extraWorkdays || [])]
+  const nonWorkdays = [...(project.nonWorkdays || [])]
+  const extraWorkdays = [...(project.extraWorkdays || [])]
 
   if (isDefaultWorkday) {
     const idx = nonWorkdays.indexOf(key)
@@ -225,8 +233,31 @@ const toggleWorkday = (date: Date) => {
     }
   }
 
-  planningStore.updatePlanning(planning.id, { nonWorkdays, extraWorkdays })
+  projectStore.updateProject(project.id, { nonWorkdays, extraWorkdays })
 }
+
+// Collapse rest days
+const collapseRestDays = ref(false)
+
+const visibleDaySlots = computed(() => {
+  if (!collapseRestDays.value) return daySlots.value
+  return daySlots.value.filter(day => isWorkday(day.date))
+})
+
+const visibleTotalSlots = computed(() => visibleDaySlots.value.length * 4)
+
+const dayIndexToVisibleCol = computed(() => {
+  if (!collapseRestDays.value) return null
+  const map = new Map<number, number>()
+  let col = 0
+  for (const day of daySlots.value) {
+    if (isWorkday(day.date)) {
+      map.set(day.dayIndex, col)
+      col++
+    }
+  }
+  return map
+})
 </script>
 
 <template>
@@ -249,6 +280,13 @@ const toggleWorkday = (date: Date) => {
           <option value="medium">中</option>
           <option value="high">高</option>
         </select>
+        <button
+          class="collapse-toggle"
+          :class="{ active: collapseRestDays }"
+          @click="collapseRestDays = !collapseRestDays"
+        >
+          {{ collapseRestDays ? '展开休息日' : '折叠休息日' }}
+        </button>
       </div>
     </div>
 
@@ -261,15 +299,15 @@ const toggleWorkday = (date: Date) => {
         <!-- Header row (sticky top) -->
         <div class="timeline-row timeline-row--header">
           <div class="task-info task-info--header">任务</div>
-          <div class="timeline-grid-header" :style="{ gridTemplateColumns: `repeat(${totalSlots}, 48px)` }">
-            <template v-for="day in daySlots" :key="day.dayIndex">
+          <div class="timeline-grid-header" :style="{ gridTemplateColumns: `repeat(${visibleTotalSlots}, 48px)` }">
+            <template v-for="(day, vi) in visibleDaySlots" :key="day.dayIndex">
               <div
                 class="date-label"
                 :class="{
                   'non-workday': !isWorkday(day.date),
                   'can-edit': canEditWorkday
                 }"
-                :style="{ gridColumn: `${day.dayIndex * 4 + 1} / ${day.dayIndex * 4 + 5}` }"
+                :style="{ gridColumn: `${vi * 4 + 1} / ${vi * 4 + 5}` }"
                 @click="canEditWorkday ? toggleWorkday(day.date) : undefined"
               >
                 {{ day.dateStr }}
@@ -292,15 +330,13 @@ const toggleWorkday = (date: Date) => {
             </div>
           </div>
 
-          <div class="task-grid" :style="{ gridTemplateColumns: `repeat(${totalSlots}, 48px)` }">
+          <div class="task-grid" :style="{ gridTemplateColumns: `repeat(${visibleTotalSlots}, 48px)` }">
             <div
-              v-for="slot in totalSlots"
-              :key="slot"
-              class="grid-cell"
-              :class="{
-                'day-start': (slot - 1) % 4 === 0,
-                'non-workday-cell': daySlots[Math.floor((slot - 1) / 4)] && !isWorkday(daySlots[Math.floor((slot - 1) / 4)].date)
-              }"
+              v-for="(day, vi) in visibleDaySlots"
+              :key="day.dayIndex"
+              class="grid-cell day-start"
+              :class="{ 'non-workday-cell': !isWorkday(day.date) }"
+              :style="{ gridColumn: `${vi * 4 + 1} / ${vi * 4 + 5}` }"
             ></div>
 
             <div
@@ -360,6 +396,30 @@ const toggleWorkday = (date: Date) => {
 
 .header-actions .select {
   min-width: 140px;
+}
+
+.collapse-toggle {
+  padding: 4px 10px;
+  font-size: 14px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-full);
+  background-color: var(--color-bg-primary);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.collapse-toggle:hover {
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+}
+
+.collapse-toggle.active {
+  background-color: var(--color-primary);
+  border-color: var(--color-primary);
+  color: white;
 }
 
 .empty-state {

@@ -43,6 +43,8 @@ export interface Project {
   name: string
   description: string
   createdAt: string
+  nonWorkdays: string[]    // 应上班但休息的日期（如节假日）
+  extraWorkdays: string[]  // 应休息但上班的日期（如加班）
 }
 
 export interface Member {
@@ -71,8 +73,6 @@ export interface Planning {
   deadline: string | null
   projectId: string
   createdAt: string
-  nonWorkdays: string[]    // 应上班但休息的日期（如节假日）
-  extraWorkdays: string[]  // 应休息但上班的日期（如加班）
 }
 
 export interface Participant {

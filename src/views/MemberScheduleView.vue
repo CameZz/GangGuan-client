@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, watchEffect } from 'vue'
 import { useRoute } from 'vue-router'
-import { useTaskStore, useProjectStore, useMemberStore, usePlanningStore } from '@/stores'
+import { useTaskStore, useProjectStore, useMemberStore, usePlanningStore, useUserStore } from '@/stores'
 import { ROLES, TASK_STAGES } from '@/types'
 import type { RoleType } from '@/types'
 
@@ -10,20 +10,19 @@ const taskStore = useTaskStore()
 const projectStore = useProjectStore()
 const memberStore = useMemberStore()
 const planningStore = usePlanningStore()
+const userStore = useUserStore()
 
 const tasks = computed(() => taskStore.tasks)
 const members = computed(() => memberStore.members)
 const plannings = computed(() => planningStore.plannings)
 const projects = computed(() => projectStore.projects)
 
-const GRID_SLOT_WIDTH = 48
+const GRID_SLOT_WIDTH = 100
 const MEMBER_INFO_WIDTH = 180
 const MEMBER_INFO_PADDING_X = 16
 const MEMBER_INFO_TOTAL_WIDTH = MEMBER_INFO_WIDTH + MEMBER_INFO_PADDING_X * 2 + 1
 
 const filterRoles = ref<RoleType[]>([])
-
-const memberGridWidth = computed(() => `${totalSlots.value * GRID_SLOT_WIDTH}px`)
 
 const toggleRole = (role: RoleType) => {
   const idx = filterRoles.value.indexOf(role)
@@ -96,8 +95,6 @@ const daySlots = computed<DaySlot[]>(() => {
   return days
 })
 
-const totalSlots = computed(() => daySlots.value.length * 4)
-
 // All tasks (global view, no project/planning filter)
 const allTasks = computed(() => tasks.value)
 
@@ -105,27 +102,57 @@ const allTasks = computed(() => tasks.value)
 interface MemberTaskItem {
   task: typeof tasks.value[0]
   participant: NonNullable<typeof tasks.value[0]['participants'][0]>
+  rowIndex: number
+  zIndex: number
+  isShadowed: boolean
+}
+
+const assignRowIndices = (items: Array<Omit<MemberTaskItem, 'rowIndex' | 'zIndex' | 'isShadowed'>>): MemberTaskItem[] => {
+  const sortedItems = [...items].sort((a, b) => {
+    const aStart = a.participant.startTime ? new Date(a.participant.startTime).getTime() : Number.MAX_SAFE_INTEGER
+    const bStart = b.participant.startTime ? new Date(b.participant.startTime).getTime() : Number.MAX_SAFE_INTEGER
+    return aStart - bStart
+  })
+
+  return sortedItems.map((item, index) => {
+    let isShadowed = false
+    for (let i = 0; i < index; i++) {
+      const earlier = sortedItems[i]
+      if (rangesOverlap(
+        { start: item.participant.startTime, end: item.participant.endTime },
+        { start: earlier.participant.startTime, end: earlier.participant.endTime }
+      )) {
+        isShadowed = true
+        break
+      }
+    }
+
+    return {
+      ...item,
+      rowIndex: 0,
+      zIndex: sortedItems.length - index,
+      isShadowed
+    }
+  })
 }
 
 const memberScheduleData = computed(() => {
-  const memberMap = new Map<string, MemberTaskItem[]>()
+  const memberMap = new Map<string, Array<Omit<MemberTaskItem, 'rowIndex' | 'zIndex' | 'isShadowed'>>>()
+
+  const rangeStart = timelineStart.value.getTime()
+  const rangeEnd = timelineEnd.value.getTime() + 24 * 60 * 60 * 1000
 
   for (const task of allTasks.value) {
+    if (currentProjectId.value && task.projectId !== currentProjectId.value) continue
     for (const participant of task.participants) {
-      if (!participant.memberId) continue
+      if (!participant.memberId || !participant.startTime) continue
+      const taskStart = new Date(participant.startTime).getTime()
+      const taskEnd = participant.endTime ? new Date(participant.endTime).getTime() : taskStart + 24 * 60 * 60 * 1000
+      if (taskEnd < rangeStart || taskStart >= rangeEnd) continue
       if (!memberMap.has(participant.memberId)) {
         memberMap.set(participant.memberId, [])
       }
       memberMap.get(participant.memberId)!.push({ task, participant })
-    }
-  }
-
-  // Find members who participate in current project's tasks
-  const projectMemberIds = new Set<string>()
-  for (const task of allTasks.value) {
-    if (currentProjectId.value && task.projectId !== currentProjectId.value) continue
-    for (const p of task.participants) {
-      if (p.memberId) projectMemberIds.add(p.memberId)
     }
   }
 
@@ -139,7 +166,6 @@ const memberScheduleData = computed(() => {
   }> = []
 
   for (const [memberId, items] of memberMap) {
-    if (!projectMemberIds.has(memberId)) continue
     const member = members.value.find(m => m.id === memberId)
     if (!member) continue
     if (filterRoles.value.length > 0 && !filterRoles.value.includes(member.role)) continue
@@ -148,7 +174,7 @@ const memberScheduleData = computed(() => {
       memberName: member.name,
       memberAvatar: member.avatar,
       memberRole: member.role,
-      items
+      items: assignRowIndices(items)
     })
   }
 
@@ -187,24 +213,42 @@ const getPlanningName = (planningId: string | null, projectId?: string): string 
 
 // Slot index calculation
 const getSlotIndex = (timestamp: string): number => {
-  const time = new Date(timestamp).getTime()
-  const start = timelineStart.value.getTime()
-  const daysDiff = (time - start) / (24 * 60 * 60 * 1000)
-  const dayIndex = Math.floor(daysDiff)
-  const hourOfDay = new Date(timestamp).getHours()
-  const slotInDay = Math.floor(hourOfDay / 6)
-  return dayIndex * 4 + slotInDay
+  const date = new Date(timestamp)
+  const start = timelineStart.value
+  const startOfDay = new Date(start.getFullYear(), start.getMonth(), start.getDate()).getTime()
+  const currentDay = new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime()
+  const daysDiff = Math.floor((currentDay - startOfDay) / (24 * 60 * 60 * 1000))
+  const hourOfDay = date.getHours()
+  const slotInDay = Math.floor(hourOfDay / 12)
+  return daysDiff * 2 + slotInDay
 }
 
 // Bar style for a task participant
-const getBarStyle = (startTime: string | null, endTime: string | null) => {
+const getBarStyle = (item: MemberTaskItem) => {
+  const startTime = item.participant.startTime
+  const endTime = item.participant.endTime
   if (!startTime) return { display: 'none' }
 
   const startSlot = getSlotIndex(startTime)
   const endSlot = endTime ? getSlotIndex(endTime) + 1 : startSlot + 1
 
+  if (dayIndexToVisibleCol.value) {
+    const startDay = Math.floor(startSlot / 2)
+    const startHalf = startSlot % 2
+    const endDay = Math.floor((endSlot - 1) / 2)
+    const endHalf = (endSlot - 1) % 2
+    const visStartDay = dayIndexToVisibleCol.value.get(startDay)
+    const visEndDay = dayIndexToVisibleCol.value.get(endDay)
+    if (visStartDay === undefined || visEndDay === undefined) return { display: 'none' }
+    return {
+      gridColumn: `${visStartDay * 2 + startHalf + 1} / ${visEndDay * 2 + endHalf + 2}`,
+      gridRow: `${item.rowIndex + 1}`
+    }
+  }
+
   return {
-    gridColumn: `${startSlot + 1} / ${endSlot + 1}`
+    gridColumn: `${startSlot + 1} / ${endSlot + 1}`,
+    gridRow: `${item.rowIndex + 1}`
   }
 }
 
@@ -212,29 +256,10 @@ const getBarStyle = (startTime: string | null, endTime: string | null) => {
 const rangesOverlap = (a: { start: string | null, end: string | null }, b: { start: string | null, end: string | null }): boolean => {
   if (!a.start || !b.start) return false
   const aStart = new Date(a.start).getTime()
-  const aEnd = a.end ? new Date(a.end).getTime() : aStart + 6 * 60 * 60 * 1000
+  const aEnd = a.end ? new Date(a.end).getTime() : aStart + 12 * 60 * 60 * 1000
   const bStart = new Date(b.start).getTime()
-  const bEnd = b.end ? new Date(b.end).getTime() : bStart + 6 * 60 * 60 * 1000
+  const bEnd = b.end ? new Date(b.end).getTime() : bStart + 12 * 60 * 60 * 1000
   return aStart < bEnd && bStart < aEnd
-}
-
-// Check if a specific item overlaps with another item of same planning
-const hasSamePlanningOverlap = (memberItems: MemberTaskItem[], currentIndex: number): boolean => {
-  const current = memberItems[currentIndex]
-  if (!current.participant.startTime) return false
-
-  for (let i = 0; i < memberItems.length; i++) {
-    if (i === currentIndex) continue
-    const other = memberItems[i]
-    if (other.task.planningId !== current.task.planningId) continue
-    if (rangesOverlap(
-      { start: current.participant.startTime, end: current.participant.endTime },
-      { start: other.participant.startTime, end: other.participant.endTime }
-    )) {
-      return true
-    }
-  }
-  return false
 }
 
 // Tooltip
@@ -278,11 +303,79 @@ const roleNames: Record<RoleType, string> = {
 }
 const getRoleName = (role: RoleType): string => roleNames[role] || role
 
-// Workday logic (simplified for global view - no per-planning overrides)
+// Workday logic
+const canEditWorkday = computed(() => userStore.isAdmin || userStore.currentUser?.role === 'pm')
+
+const formatDateKey = (date: Date): string => {
+  const y = date.getFullYear()
+  const m = String(date.getMonth() + 1).padStart(2, '0')
+  const d = String(date.getDate()).padStart(2, '0')
+  return `${y}-${m}-${d}`
+}
+
 const isWorkday = (date: Date): boolean => {
+  const key = formatDateKey(date)
+  const project = projectStore.currentProject
+  if (project?.nonWorkdays?.includes(key)) return false
+  if (project?.extraWorkdays?.includes(key)) return true
   const day = date.getDay()
   return day >= 1 && day <= 5
 }
+
+const toggleWorkday = (date: Date) => {
+  const project = projectStore.currentProject
+  if (!project) return
+
+  const key = formatDateKey(date)
+  const day = date.getDay()
+  const isDefaultWorkday = day >= 1 && day <= 5
+
+  const nonWorkdays = [...(project.nonWorkdays || [])]
+  const extraWorkdays = [...(project.extraWorkdays || [])]
+
+  if (isDefaultWorkday) {
+    const idx = nonWorkdays.indexOf(key)
+    if (idx >= 0) {
+      nonWorkdays.splice(idx, 1)
+    } else {
+      nonWorkdays.push(key)
+    }
+  } else {
+    const idx = extraWorkdays.indexOf(key)
+    if (idx >= 0) {
+      extraWorkdays.splice(idx, 1)
+    } else {
+      extraWorkdays.push(key)
+    }
+  }
+
+  projectStore.updateProject(project.id, { nonWorkdays, extraWorkdays })
+}
+
+// Collapse rest days
+const collapseRestDays = ref(false)
+
+const visibleDaySlots = computed(() => {
+  if (!collapseRestDays.value) return daySlots.value
+  return daySlots.value.filter(day => isWorkday(day.date))
+})
+
+const visibleTotalSlots = computed(() => visibleDaySlots.value.length * 2)
+
+const dayIndexToVisibleCol = computed(() => {
+  if (!collapseRestDays.value) return null
+  const map = new Map<number, number>()
+  let col = 0
+  for (const day of daySlots.value) {
+    if (isWorkday(day.date)) {
+      map.set(day.dayIndex, col)
+      col++
+    }
+  }
+  return map
+})
+
+const visibleGridWidth = computed(() => `${visibleTotalSlots.value * GRID_SLOT_WIDTH}px`)
 
 // Active plannings for legend (with project info)
 const activePlannings = computed(() => {
@@ -326,6 +419,13 @@ const activePlannings = computed(() => {
         <select v-model="selectedMonth" class="input select select-xs">
           <option v-for="m in monthOptions" :key="m" :value="m">{{ m }}月</option>
         </select>
+        <button
+          class="collapse-toggle"
+          :class="{ active: collapseRestDays }"
+          @click="collapseRestDays = !collapseRestDays"
+        >
+          {{ collapseRestDays ? '展开休息日' : '折叠休息日' }}
+        </button>
       </div>
     </div>
 
@@ -341,15 +441,16 @@ const activePlannings = computed(() => {
           <div
             class="schedule-grid-header"
             :style="{
-              gridTemplateColumns: `repeat(${totalSlots}, ${GRID_SLOT_WIDTH}px)`,
-              minWidth: memberGridWidth
+              gridTemplateColumns: `repeat(${visibleTotalSlots}, ${GRID_SLOT_WIDTH}px)`,
+              minWidth: visibleGridWidth
             }"
           >
-            <template v-for="day in daySlots" :key="day.dayIndex">
+            <template v-for="(day, vi) in visibleDaySlots" :key="day.dayIndex">
               <div
                 class="date-label"
-                :class="{ 'non-workday': !isWorkday(day.date) }"
-                :style="{ gridColumn: `${day.dayIndex * 4 + 1} / ${day.dayIndex * 4 + 5}` }"
+                :class="{ 'non-workday': !isWorkday(day.date), 'can-edit': canEditWorkday }"
+                :style="{ gridColumn: `${vi * 2 + 1} / ${vi * 2 + 3}` }"
+                @click="canEditWorkday ? toggleWorkday(day.date) : undefined"
               >
                 {{ day.dateStr }}
                 <span v-if="!isWorkday(day.date)" class="rest-badge">休</span>
@@ -372,16 +473,14 @@ const activePlannings = computed(() => {
             </div>
           </div>
 
-          <div class="member-grid" :style="{ gridTemplateColumns: `repeat(${totalSlots}, ${GRID_SLOT_WIDTH}px)`, minWidth: memberGridWidth }">
+          <div class="member-grid" :style="{ gridTemplateColumns: `repeat(${visibleTotalSlots}, ${GRID_SLOT_WIDTH}px)`, minWidth: visibleGridWidth }">
             <!-- Grid cells -->
             <div
-              v-for="slot in totalSlots"
-              :key="slot"
-              class="grid-cell"
-              :class="{
-                'day-start': (slot - 1) % 4 === 0,
-                'non-workday-cell': daySlots[Math.floor((slot - 1) / 4)] && !isWorkday(daySlots[Math.floor((slot - 1) / 4)].date)
-              }"
+              v-for="(day, vi) in visibleDaySlots"
+              :key="day.dayIndex"
+              class="grid-cell day-start"
+              :class="{ 'non-workday-cell': !isWorkday(day.date) }"
+              :style="{ gridColumn: `${vi * 2 + 1} / ${vi * 2 + 3}` }"
             ></div>
 
             <!-- Task bars -->
@@ -389,10 +488,12 @@ const activePlannings = computed(() => {
               v-for="(item, index) in memberData.items"
               :key="`${item.task.id}-${index}`"
               class="task-bar"
-              :class="{ 'has-overlap': hasSamePlanningOverlap(memberData.items, index) }"
+              :class="{ 'is-shadowed': item.isShadowed }"
               :style="{
-                ...getBarStyle(item.participant.startTime, item.participant.endTime),
-                backgroundColor: getPlanningColor(item.task.planningId)
+                ...getBarStyle(item),
+                backgroundColor: getPlanningColor(item.task.planningId),
+                zIndex: item.zIndex,
+                borderColor: item.isShadowed ? getPlanningColor(item.task.planningId) : undefined
               }"
               @mouseenter="showTooltip($event, item)"
               @mouseleave="hideTooltip"
@@ -489,6 +590,30 @@ const activePlannings = computed(() => {
 }
 
 .role-chip.active {
+  background-color: var(--color-primary);
+  border-color: var(--color-primary);
+  color: white;
+}
+
+.collapse-toggle {
+  padding: 4px 10px;
+  font-size: 14px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-full);
+  background-color: var(--color-bg-primary);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.collapse-toggle:hover {
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+}
+
+.collapse-toggle.active {
   background-color: var(--color-primary);
   border-color: var(--color-primary);
   color: white;
@@ -616,6 +741,15 @@ const activePlannings = computed(() => {
   color: #9ca3af;
 }
 
+.date-label.can-edit {
+  cursor: pointer;
+  user-select: none;
+}
+
+.date-label.can-edit:hover {
+  background-color: var(--color-bg-secondary);
+}
+
 .rest-badge {
   display: inline-block;
   font-size: 10px;
@@ -628,17 +762,16 @@ const activePlannings = computed(() => {
 .member-grid {
   display: grid;
   position: relative;
-  grid-auto-rows: 32px;
-  row-gap: 8px;
-  align-items: start;
+  grid-template-rows: 40px;
+  align-items: center;
   padding: 8px 0;
 }
 
 .grid-cell {
-  grid-row: 1 / -1;
+  grid-row: 1;
   border-right: 1px solid var(--color-border);
   opacity: 0.3;
-  min-height: 48px;
+  min-height: 40px;
 }
 
 .grid-cell.day-start {
@@ -653,8 +786,8 @@ const activePlannings = computed(() => {
 /* Task bars */
 .task-bar {
   position: relative;
-  min-height: 24px;
-  margin: 4px 2px;
+  height: 32px;
+  margin: 0 2px;
   border-radius: var(--radius-sm);
   display: flex;
   align-items: center;
@@ -666,27 +799,17 @@ const activePlannings = computed(() => {
   text-overflow: ellipsis;
   cursor: pointer;
   transition: opacity var(--transition-fast);
-  z-index: 2;
-  align-self: center;
+  grid-row: 1;
 }
 
 .task-bar:hover {
   opacity: 0.85;
 }
 
-.task-bar.has-overlap::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  border-radius: var(--radius-sm);
-  background: repeating-linear-gradient(
-    45deg,
-    transparent,
-    transparent 3px,
-    rgba(0, 0, 0, 0.18) 3px,
-    rgba(0, 0, 0, 0.18) 6px
-  );
-  pointer-events: none;
+.task-bar.is-shadowed {
+  opacity: 0.4;
+  border: 2px solid;
+  background-clip: padding-box;
 }
 
 .bar-label {
