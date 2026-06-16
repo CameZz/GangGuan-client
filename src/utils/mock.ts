@@ -8,6 +8,19 @@ import type {
     Planning,
     User,
 } from "@/types";
+import {
+    createDefaultPhaseTemplates,
+    createLegacyTaskPhase,
+    deriveStageFromPhase,
+    deriveStatusFromPhases,
+    getCurrentTaskPhase,
+    normalizePhaseTemplates,
+    normalizeTaskPhases,
+} from "@/utils/taskPhases";
+
+type ProjectSeed = Omit<Project, "phaseTemplates"> & Partial<Pick<Project, "phaseTemplates">>;
+type TaskSeed = Omit<Task, "itemType" | "parentRequirementId" | "phases" | "currentPhaseId"> &
+    Partial<Pick<Task, "itemType" | "parentRequirementId" | "phases" | "currentPhaseId">>;
 
 // Generate unique IDs
 const generateId = (): string => {
@@ -260,7 +273,7 @@ const mockUsers: User[] = [
 ];
 
 // Initial mock data
-const mockProjects: Project[] = [
+const mockProjects: ProjectSeed[] = [
     {
         id: "proj-1",
         name: "英勇之地手游",
@@ -273,7 +286,7 @@ const mockProjects: Project[] = [
         id: "proj-2",
         name: "英勇之地端游",
         description: "端游开发项目，包含策划、美术、程序等多个部门的协作",
-        createdAt: "2026-04-25T09:00:00Z",
+        createdAt: "2026-04-25T00:00:00Z",
         nonWorkdays: [],
         extraWorkdays: [],
     },
@@ -293,7 +306,7 @@ const mockPlannings: Planning[] = [
         name: "核心战斗系统",
         deadline: "2026-06-01T00:00:00Z",
         projectId: "proj-1",
-        createdAt: "2026-05-01T09:00:00Z",
+        createdAt: "2026-05-01T00:00:00Z",
     },
     {
         id: "plan-3",
@@ -319,11 +332,73 @@ const mockPlannings: Planning[] = [
     },
 ];
 
-const mockTasks: Task[] = [
+const normalizeProject = (project: ProjectSeed | Project): Project => ({
+    ...project,
+    phaseTemplates: normalizePhaseTemplates(project.phaseTemplates),
+});
+
+const normalizeTask = (task: TaskSeed | Task): Task => {
+    const itemType = task.itemType || "task";
+    const existingPhases = normalizeTaskPhases(task.phases);
+    const phases = itemType === "requirement"
+        ? []
+        : existingPhases.length > 0
+            ? existingPhases
+            : [createLegacyTaskPhase(task.stage || "filed", task.assigneeId || null, task.status || "todo")];
+    const currentPhase = getCurrentTaskPhase(phases);
+    const stage = itemType === "requirement"
+        ? "filed"
+        : deriveStageFromPhase(currentPhase, task.stage || "filed");
+    const status = itemType === "requirement"
+        ? task.status
+        : deriveStatusFromPhases(phases, task.status || "todo");
+    return {
+        ...task,
+        itemType,
+        parentRequirementId: itemType === "requirement" ? null : task.parentRequirementId || null,
+        assigneeId: itemType === "requirement" ? null : currentPhase?.assigneeId || task.assigneeId || null,
+        dueDate: itemType === "requirement" ? null : task.dueDate,
+        participants: itemType === "requirement" ? [] : task.participants,
+        stage,
+        status,
+        phases,
+        currentPhaseId: currentPhase?.id || null,
+    };
+};
+
+const mockTasks: TaskSeed[] = [
     // ========== 手游项目 (proj-1) ==========
     // --- 立项与策划 (plan-1) ---
+
+    // 需求单: 游戏世界观设计
+    {
+        id: "req-1",
+        itemType: "requirement",
+        parentRequirementId: null,
+        title: "游戏世界观设计",
+        description: "完成游戏世界观的整体设计，包括背景故事、种族设定、职业体系等核心内容",
+        status: "done",
+        priority: "high",
+        dueDate: null,
+        projectId: "proj-1",
+        assigneeId: null,
+        createdAt: "2026-05-04T10:00:00Z",
+        updatedAt: "2026-05-12T15:00:00Z",
+        stage: "completed",
+        planningId: "plan-1",
+        participants: [],
+        references: [
+            { type: "document", url: "https://docs.example.com/world-setting", title: "世界观设定文档" },
+        ],
+        comments: [
+            { id: "com-1", authorId: "user-2", content: "世界观设定已通过评审", createdAt: "2026-05-12T14:00:00Z" },
+        ],
+    },
+    // 子任务: 游戏世界观设定
     {
         id: "task-1",
+        itemType: "task",
+        parentRequirementId: "req-1",
         title: "游戏世界观设定",
         description: "完成游戏背景故事、种族设定、职业体系",
         status: "done",
@@ -336,18 +411,38 @@ const mockTasks: Task[] = [
         stage: "completed",
         planningId: "plan-1",
         participants: [
-            { roleType: "pm", memberId: "user-2", startTime: "2026-05-04T09:00:00Z", endTime: "2026-05-12T18:00:00Z" },
-            { roleType: "planner", memberId: "user-4", startTime: "2026-05-04T09:00:00Z", endTime: "2026-05-12T18:00:00Z" },
+            { roleType: "pm", memberId: "user-2", startTime: "2026-05-04T00:00:00Z", endTime: "2026-05-12T12:00:00Z" },
+            { roleType: "planner", memberId: "user-4", startTime: "2026-05-04T00:00:00Z", endTime: "2026-05-12T12:00:00Z" },
         ],
-        references: [
-            { type: "document", url: "https://docs.example.com/world-setting", title: "世界观设定文档" },
-        ],
-        comments: [
-            { id: "com-1", authorId: "user-2", content: "世界观设定已通过评审", createdAt: "2026-05-12T14:00:00Z" },
-        ],
+        references: [],
+        comments: [],
     },
+
+    // 需求单: 经济系统设计
+    {
+        id: "req-2",
+        itemType: "requirement",
+        parentRequirementId: null,
+        title: "经济系统设计",
+        description: "设计游戏内完整的经济体系，包括货币系统、交易系统、商城系统",
+        status: "in-progress",
+        priority: "high",
+        dueDate: null,
+        projectId: "proj-1",
+        assigneeId: null,
+        createdAt: "2026-05-11T00:00:00Z",
+        updatedAt: "2026-05-15T16:00:00Z",
+        stage: "designing",
+        planningId: "plan-1",
+        participants: [],
+        references: [],
+        comments: [],
+    },
+    // 子任务: 经济系统设计
     {
         id: "task-2",
+        itemType: "task",
+        parentRequirementId: "req-2",
         title: "经济系统设计",
         description: "设计游戏内货币、交易、商城系统",
         status: "in-progress",
@@ -355,23 +450,48 @@ const mockTasks: Task[] = [
         dueDate: "2026-05-22T00:00:00Z",
         projectId: "proj-1",
         assigneeId: "user-4",
-        createdAt: "2026-05-11T09:00:00Z",
+        createdAt: "2026-05-11T00:00:00Z",
         updatedAt: "2026-05-15T16:00:00Z",
         stage: "designing",
         planningId: "plan-1",
         participants: [
-            // Alice(user-2) 重叠: task-1(5/4~5/12) + task-2(5/11~5/22), 重叠日 5/11~5/12
-            { roleType: "pm", memberId: "user-2", startTime: "2026-05-11T09:00:00Z", endTime: "2026-05-22T18:00:00Z" },
-            // Carol(user-4) 重叠: task-1(5/4~5/12) + task-2(5/8~5/20), 重叠日 5/8~5/12
-            { roleType: "planner", memberId: "user-4", startTime: "2026-05-08T09:00:00Z", endTime: "2026-05-20T18:00:00Z" },
-            { roleType: "server", memberId: "user-3", startTime: "2026-05-14T09:00:00Z", endTime: "2026-05-22T18:00:00Z" },
+            { roleType: "pm", memberId: "user-2", startTime: "2026-05-11T00:00:00Z", endTime: "2026-05-22T12:00:00Z" },
+            { roleType: "planner", memberId: "user-4", startTime: "2026-05-08T00:00:00Z", endTime: "2026-05-20T12:00:00Z" },
+            { roleType: "server", memberId: "user-3", startTime: "2026-05-14T00:00:00Z", endTime: "2026-05-22T12:00:00Z" },
         ],
         references: [],
         comments: [],
     },
+
     // --- 核心战斗系统 (plan-2) ---
+
+    // 需求单: 战斗系统开发
+    {
+        id: "req-3",
+        itemType: "requirement",
+        parentRequirementId: null,
+        title: "战斗系统开发",
+        description: "开发完整的核心战斗系统，包括战斗引擎、角色控制、技能特效",
+        status: "in-progress",
+        priority: "high",
+        dueDate: null,
+        projectId: "proj-1",
+        assigneeId: null,
+        createdAt: "2026-05-13T00:00:00Z",
+        updatedAt: "2026-05-20T12:00:00Z",
+        stage: "initial",
+        planningId: "plan-2",
+        participants: [],
+        references: [
+            { type: "design", url: "https://figma.com/combat-design", title: "战斗系统设计稿" },
+        ],
+        comments: [],
+    },
+    // 子任务: 战斗引擎开发
     {
         id: "task-3",
+        itemType: "task",
+        parentRequirementId: "req-3",
         title: "战斗引擎开发",
         description: "实现实时战斗逻辑、技能系统、伤害计算",
         status: "in-progress",
@@ -379,23 +499,23 @@ const mockTasks: Task[] = [
         dueDate: "2026-05-29T00:00:00Z",
         projectId: "proj-1",
         assigneeId: "user-3",
-        createdAt: "2026-05-13T09:00:00Z",
+        createdAt: "2026-05-13T00:00:00Z",
         updatedAt: "2026-05-20T12:00:00Z",
         stage: "initial",
         planningId: "plan-2",
         participants: [
-            { roleType: "pm", memberId: "user-2", startTime: "2026-05-13T09:00:00Z", endTime: "2026-05-29T18:00:00Z" },
-            { roleType: "server", memberId: "user-3", startTime: "2026-05-18T09:00:00Z", endTime: "2026-05-29T18:00:00Z" },
-            // David(user-5) 重叠: task-3(5/18~5/29) + task-4(5/14~5/25), 重叠日 5/18~5/25
-            { roleType: "client", memberId: "user-5", startTime: "2026-05-18T09:00:00Z", endTime: "2026-05-29T18:00:00Z" },
+            { roleType: "pm", memberId: "user-2", startTime: "2026-05-13T00:00:00Z", endTime: "2026-05-29T12:00:00Z" },
+            { roleType: "server", memberId: "user-3", startTime: "2026-05-18T00:00:00Z", endTime: "2026-05-29T12:00:00Z" },
+            { roleType: "client", memberId: "user-5", startTime: "2026-05-18T00:00:00Z", endTime: "2026-05-29T12:00:00Z" },
         ],
-        references: [
-            { type: "design", url: "https://figma.com/combat-design", title: "战斗系统设计稿" },
-        ],
+        references: [],
         comments: [],
     },
+    // 子任务: 战斗角色控制器
     {
         id: "task-4",
+        itemType: "task",
+        parentRequirementId: "req-3",
         title: "战斗角色控制器",
         description: "实现角色移动、攻击、闪避等操作",
         status: "in-progress",
@@ -408,16 +528,17 @@ const mockTasks: Task[] = [
         stage: "initial",
         planningId: "plan-2",
         participants: [
-            // David(user-5) 重叠: task-4(5/14~5/25) + task-3(5/18~5/29), 重叠日 5/18~5/25
-            { roleType: "client", memberId: "user-5", startTime: "2026-05-14T09:00:00Z", endTime: "2026-05-25T18:00:00Z" },
-            // Mia(user-16) 重叠: task-4(5/20~5/25) + task-5(5/18~5/27), 重叠日 5/20~5/25
-            { roleType: "animator", memberId: "user-16", startTime: "2026-05-20T09:00:00Z", endTime: "2026-05-25T18:00:00Z" },
+            { roleType: "client", memberId: "user-5", startTime: "2026-05-14T00:00:00Z", endTime: "2026-05-25T12:00:00Z" },
+            { roleType: "animator", memberId: "user-16", startTime: "2026-05-20T00:00:00Z", endTime: "2026-05-25T12:00:00Z" },
         ],
         references: [],
         comments: [],
     },
+    // 子任务: 技能特效制作
     {
         id: "task-5",
+        itemType: "task",
+        parentRequirementId: "req-3",
         title: "技能特效制作",
         description: "制作各职业技能特效和打击反馈",
         status: "in-progress",
@@ -430,16 +551,40 @@ const mockTasks: Task[] = [
         stage: "designing",
         planningId: "plan-2",
         participants: [
-            // Mia(user-16) 重叠: task-5(5/18~5/27) + task-4(5/20~5/25), 重叠日 5/20~5/25
-            { roleType: "animator", memberId: "user-16", startTime: "2026-05-18T09:00:00Z", endTime: "2026-05-27T18:00:00Z" },
-            { roleType: "artist", memberId: "user-8", startTime: "2026-05-18T09:00:00Z", endTime: "2026-05-27T18:00:00Z" },
+            { roleType: "animator", memberId: "user-16", startTime: "2026-05-18T00:00:00Z", endTime: "2026-05-27T12:00:00Z" },
+            { roleType: "artist", memberId: "user-8", startTime: "2026-05-18T00:00:00Z", endTime: "2026-05-27T12:00:00Z" },
         ],
         references: [],
         comments: [],
     },
+
     // --- 角色养成系统 (plan-3) ---
+
+    // 需求单: 角色养成系统开发
+    {
+        id: "req-4",
+        itemType: "requirement",
+        parentRequirementId: null,
+        title: "角色养成系统开发",
+        description: "开发完整的角色养成系统，包括等级提升、装备系统、UI界面",
+        status: "in-progress",
+        priority: "high",
+        dueDate: null,
+        projectId: "proj-1",
+        assigneeId: null,
+        createdAt: "2026-05-18T10:00:00Z",
+        updatedAt: "2026-05-20T00:00:00Z",
+        stage: "designing",
+        planningId: "plan-3",
+        participants: [],
+        references: [],
+        comments: [],
+    },
+    // 子任务: 角色升级机制
     {
         id: "task-6",
+        itemType: "task",
+        parentRequirementId: "req-4",
         title: "角色升级机制",
         description: "实现角色经验值、等级提升、属性加点",
         status: "todo",
@@ -452,16 +597,18 @@ const mockTasks: Task[] = [
         stage: "filed",
         planningId: "plan-3",
         participants: [
-            { roleType: "pm", memberId: "user-2", startTime: "2026-05-18T09:00:00Z", endTime: "2026-06-05T18:00:00Z" },
-            // Carol(user-4) 重叠: task-2(5/8~5/20) + task-6(5/25~6/5), 无重叠（间隔）
-            { roleType: "planner", memberId: "user-4", startTime: "2026-05-25T09:00:00Z", endTime: "2026-06-05T18:00:00Z" },
-            { roleType: "server", memberId: "user-3", startTime: "2026-05-25T09:00:00Z", endTime: "2026-06-05T18:00:00Z" },
+            { roleType: "pm", memberId: "user-2", startTime: "2026-05-18T00:00:00Z", endTime: "2026-06-05T12:00:00Z" },
+            { roleType: "planner", memberId: "user-4", startTime: "2026-05-25T00:00:00Z", endTime: "2026-06-05T12:00:00Z" },
+            { roleType: "server", memberId: "user-3", startTime: "2026-05-25T00:00:00Z", endTime: "2026-06-05T12:00:00Z" },
         ],
         references: [],
         comments: [],
     },
+    // 子任务: 装备系统开发
     {
         id: "task-7",
+        itemType: "task",
+        parentRequirementId: "req-4",
         title: "装备系统开发",
         description: "实现装备穿戴、强化、合成、交易",
         status: "todo",
@@ -469,19 +616,22 @@ const mockTasks: Task[] = [
         dueDate: "2026-06-10T00:00:00Z",
         projectId: "proj-1",
         assigneeId: "user-12",
-        createdAt: "2026-05-20T09:00:00Z",
-        updatedAt: "2026-05-20T09:00:00Z",
+        createdAt: "2026-05-20T00:00:00Z",
+        updatedAt: "2026-05-20T00:00:00Z",
         stage: "filed",
         planningId: "plan-3",
         participants: [
-            { roleType: "server", memberId: "user-12", startTime: "2026-05-25T09:00:00Z", endTime: "2026-06-10T18:00:00Z" },
-            { roleType: "client", memberId: "user-5", startTime: "2026-05-26T09:00:00Z", endTime: "2026-06-10T18:00:00Z" },
+            { roleType: "server", memberId: "user-12", startTime: "2026-05-25T00:00:00Z", endTime: "2026-06-10T12:00:00Z" },
+            { roleType: "client", memberId: "user-5", startTime: "2026-05-26T00:00:00Z", endTime: "2026-06-10T12:00:00Z" },
         ],
         references: [],
         comments: [],
     },
+    // 子任务: UI界面设计-角色面板
     {
         id: "task-8",
+        itemType: "task",
+        parentRequirementId: "req-4",
         title: "UI界面设计-角色面板",
         description: "设计角色信息、背包、装备界面",
         status: "in-progress",
@@ -494,18 +644,277 @@ const mockTasks: Task[] = [
         stage: "designing",
         planningId: "plan-3",
         participants: [
-            { roleType: "ui", memberId: "user-10", startTime: "2026-05-11T09:00:00Z", endTime: "2026-05-30T18:00:00Z" },
-            { roleType: "artist", memberId: "user-8", startTime: "2026-05-20T09:00:00Z", endTime: "2026-05-30T18:00:00Z" },
+            { roleType: "ui", memberId: "user-10", startTime: "2026-05-11T00:00:00Z", endTime: "2026-05-30T12:00:00Z" },
+            { roleType: "artist", memberId: "user-8", startTime: "2026-05-20T00:00:00Z", endTime: "2026-05-30T12:00:00Z" },
         ],
         references: [
             { type: "ui", url: "https://figma.com/character-ui", title: "角色面板UI设计" },
         ],
         comments: [],
     },
+
+    // 需求单: 社交系统开发（包含多种状态的任务）
+    {
+        id: "req-7",
+        itemType: "requirement",
+        parentRequirementId: null,
+        title: "社交系统开发",
+        description: "开发游戏内社交功能，包括好友系统、聊天系统、公会系统、排行榜等",
+        status: "in-progress",
+        priority: "high",
+        dueDate: null,
+        projectId: "proj-1",
+        assigneeId: null,
+        createdAt: "2026-05-20T10:00:00Z",
+        updatedAt: "2026-05-25T16:00:00Z",
+        stage: "initial",
+        planningId: "plan-2",
+        participants: [],
+        references: [
+            { type: "document", url: "https://docs.example.com/social-system", title: "社交系统设计文档" },
+        ],
+        comments: [
+            { id: "com-10", authorId: "user-2", content: "社交系统需求评审通过", createdAt: "2026-05-20T14:00:00Z" },
+        ],
+    },
+    // 子任务1: 好友系统（已完成）
+    {
+        id: "task-20",
+        itemType: "task",
+        parentRequirementId: "req-7",
+        title: "好友系统",
+        description: "实现好友添加、删除、在线状态、好友列表功能",
+        status: "done",
+        priority: "high",
+        dueDate: "2026-05-25T00:00:00Z",
+        projectId: "proj-1",
+        assigneeId: "user-12",
+        createdAt: "2026-05-20T10:00:00Z",
+        updatedAt: "2026-05-25T18:00:00Z",
+        stage: "completed",
+        planningId: "plan-2",
+        participants: [
+            { roleType: "server", memberId: "user-12", startTime: "2026-05-20T00:00:00Z", endTime: "2026-05-25T12:00:00Z" },
+            { roleType: "client", memberId: "user-5", startTime: "2026-05-20T00:00:00Z", endTime: "2026-05-25T12:00:00Z" },
+        ],
+        references: [],
+        comments: [
+            { id: "com-11", authorId: "user-12", content: "好友系统开发完成，已通过测试", createdAt: "2026-05-25T17:00:00Z" },
+        ],
+    },
+    // 子任务2: 聊天系统（进行中）
+    {
+        id: "task-21",
+        itemType: "task",
+        parentRequirementId: "req-7",
+        title: "聊天系统",
+        description: "实现私聊、世界频道、公会频道等聊天功能",
+        status: "in-progress",
+        priority: "high",
+        dueDate: "2026-05-30T00:00:00Z",
+        projectId: "proj-1",
+        assigneeId: "user-3",
+        createdAt: "2026-05-22T08:00:00Z",
+        updatedAt: "2026-05-28T10:00:00Z",
+        stage: "initial",
+        planningId: "plan-2",
+        participants: [
+            { roleType: "server", memberId: "user-3", startTime: "2026-05-22T00:00:00Z", endTime: "2026-05-30T12:00:00Z" },
+            { roleType: "client", memberId: "user-13", startTime: "2026-05-24T00:00:00Z", endTime: "2026-05-30T12:00:00Z" },
+        ],
+        references: [],
+        comments: [],
+    },
+    // 子任务3: 公会系统（待办）
+    {
+        id: "task-22",
+        itemType: "task",
+        parentRequirementId: "req-7",
+        title: "公会系统",
+        description: "实现公会创建、加入、退出、公会管理功能",
+        status: "todo",
+        priority: "medium",
+        dueDate: "2026-06-05T00:00:00Z",
+        projectId: "proj-1",
+        assigneeId: "user-12",
+        createdAt: "2026-05-25T14:00:00Z",
+        updatedAt: "2026-05-25T14:00:00Z",
+        stage: "filed",
+        planningId: "plan-2",
+        participants: [
+            { roleType: "server", memberId: "user-12", startTime: "2026-05-28T00:00:00Z", endTime: "2026-06-05T12:00:00Z" },
+            { roleType: "client", memberId: "user-5", startTime: "2026-05-30T00:00:00Z", endTime: "2026-06-05T12:00:00Z" },
+        ],
+        references: [],
+        comments: [],
+    },
+    // 子任务4: 排行榜系统（已废弃）
+    {
+        id: "task-23",
+        itemType: "task",
+        parentRequirementId: "req-7",
+        title: "排行榜系统",
+        description: "实现战力排行、等级排行、公会排行等",
+        status: "abandoned",
+        priority: "low",
+        dueDate: null,
+        projectId: "proj-1",
+        assigneeId: null,
+        createdAt: "2026-05-20T10:00:00Z",
+        updatedAt: "2026-05-26T09:00:00Z",
+        stage: "filed",
+        planningId: "plan-2",
+        participants: [],
+        references: [],
+        comments: [
+            { id: "com-12", authorId: "user-2", content: "排行榜功能移至下个版本实现", createdAt: "2026-05-26T09:00:00Z" },
+        ],
+    },
+
+    // 需求单: 商城系统开发（包含多种状态的任务）
+    {
+        id: "req-8",
+        itemType: "requirement",
+        parentRequirementId: null,
+        title: "商城系统开发",
+        description: "开发游戏内商城功能，包括商品展示、购买流程、礼包系统、充值接口",
+        status: "in-progress",
+        priority: "high",
+        dueDate: null,
+        projectId: "proj-1",
+        assigneeId: null,
+        createdAt: "2026-05-18T08:00:00Z",
+        updatedAt: "2026-05-28T14:00:00Z",
+        stage: "initial",
+        planningId: "plan-3",
+        participants: [],
+        references: [],
+        comments: [],
+    },
+    // 子任务1: 商品配置系统（已完成）
+    {
+        id: "task-24",
+        itemType: "task",
+        parentRequirementId: "req-8",
+        title: "商品配置系统",
+        description: "实现商品数据配置、上下架管理、价格设置",
+        status: "done",
+        priority: "high",
+        dueDate: "2026-05-22T00:00:00Z",
+        projectId: "proj-1",
+        assigneeId: "user-12",
+        createdAt: "2026-05-18T08:00:00Z",
+        updatedAt: "2026-05-22T16:00:00Z",
+        stage: "completed",
+        planningId: "plan-3",
+        participants: [
+            { roleType: "server", memberId: "user-12", startTime: "2026-05-18T00:00:00Z", endTime: "2026-05-22T12:00:00Z" },
+        ],
+        references: [],
+        comments: [],
+    },
+    // 子任务2: 商城界面开发（进行中）
+    {
+        id: "task-25",
+        itemType: "task",
+        parentRequirementId: "req-8",
+        title: "商城界面开发",
+        description: "实现商城主界面、商品详情、购买弹窗等UI",
+        status: "in-progress",
+        priority: "high",
+        dueDate: "2026-05-28T00:00:00Z",
+        projectId: "proj-1",
+        assigneeId: "user-10",
+        createdAt: "2026-05-20T10:00:00Z",
+        updatedAt: "2026-05-26T14:00:00Z",
+        stage: "initial",
+        planningId: "plan-3",
+        participants: [
+            { roleType: "ui", memberId: "user-10", startTime: "2026-05-20T00:00:00Z", endTime: "2026-05-28T12:00:00Z" },
+            { roleType: "client", memberId: "user-5", startTime: "2026-05-22T00:00:00Z", endTime: "2026-05-28T12:00:00Z" },
+        ],
+        references: [
+            { type: "ui", url: "https://figma.com/shop-ui", title: "商城UI设计稿" },
+        ],
+        comments: [],
+    },
+    // 子任务3: 支付接口对接（进行中）
+    {
+        id: "task-26",
+        itemType: "task",
+        parentRequirementId: "req-8",
+        title: "支付接口对接",
+        description: "对接第三方支付SDK，实现充值、购买流程",
+        status: "in-progress",
+        priority: "high",
+        dueDate: "2026-06-01T00:00:00Z",
+        projectId: "proj-1",
+        assigneeId: "user-3",
+        createdAt: "2026-05-22T08:00:00Z",
+        updatedAt: "2026-05-28T11:00:00Z",
+        stage: "designing",
+        planningId: "plan-3",
+        participants: [
+            { roleType: "server", memberId: "user-3", startTime: "2026-05-22T00:00:00Z", endTime: "2026-06-01T12:00:00Z" },
+            { roleType: "devops", memberId: "user-14", startTime: "2026-05-25T00:00:00Z", endTime: "2026-06-01T12:00:00Z" },
+        ],
+        references: [],
+        comments: [],
+    },
+    // 子任务4: 礼包系统（待办）
+    {
+        id: "task-27",
+        itemType: "task",
+        parentRequirementId: "req-8",
+        title: "礼包系统",
+        description: "实现首充礼包、限时礼包、等级礼包等",
+        status: "todo",
+        priority: "medium",
+        dueDate: "2026-06-08T00:00:00Z",
+        projectId: "proj-1",
+        assigneeId: "user-12",
+        createdAt: "2026-05-25T10:00:00Z",
+        updatedAt: "2026-05-25T10:00:00Z",
+        stage: "filed",
+        planningId: "plan-3",
+        participants: [
+            { roleType: "server", memberId: "user-12", startTime: "2026-06-01T00:00:00Z", endTime: "2026-06-08T12:00:00Z" },
+            { roleType: "planner", memberId: "user-4", startTime: "2026-05-28T00:00:00Z", endTime: "2026-06-08T12:00:00Z" },
+        ],
+        references: [],
+        comments: [],
+    },
+
     // ========== 端游项目 (proj-2) ==========
     // --- 引擎与框架搭建 (plan-5) ---
+
+    // 需求单: 开发环境搭建
+    {
+        id: "req-5",
+        itemType: "requirement",
+        parentRequirementId: null,
+        title: "开发环境搭建",
+        description: "搭建端游项目的开发环境，包括引擎配置、网络框架",
+        status: "in-progress",
+        priority: "high",
+        dueDate: null,
+        projectId: "proj-2",
+        assigneeId: null,
+        createdAt: "2026-05-04T08:00:00Z",
+        updatedAt: "2026-05-15T16:00:00Z",
+        stage: "preliminary",
+        planningId: "plan-5",
+        participants: [],
+        references: [
+            { type: "document", url: "https://docs.example.com/ue5-setup", title: "引擎配置指南" },
+        ],
+        comments: [],
+    },
+    // 子任务: UE5引擎配置
     {
         id: "task-11",
+        itemType: "task",
+        parentRequirementId: "req-5",
         title: "UE5引擎配置",
         description: "配置引擎开发环境、源码管理、CI/CD流程",
         status: "done",
@@ -518,16 +927,17 @@ const mockTasks: Task[] = [
         stage: "completed",
         planningId: "plan-5",
         participants: [
-            { roleType: "devops", memberId: "user-14", startTime: "2026-05-04T09:00:00Z", endTime: "2026-05-16T18:00:00Z" },
-            { roleType: "pm", memberId: "user-6", startTime: "2026-05-04T09:00:00Z", endTime: "2026-05-10T18:00:00Z" },
+            { roleType: "devops", memberId: "user-14", startTime: "2026-05-04T00:00:00Z", endTime: "2026-05-16T12:00:00Z" },
+            { roleType: "pm", memberId: "user-6", startTime: "2026-05-04T00:00:00Z", endTime: "2026-05-10T12:00:00Z" },
         ],
-        references: [
-            { type: "document", url: "https://docs.example.com/ue5-setup", title: "引擎配置指南" },
-        ],
+        references: [],
         comments: [],
     },
+    // 子任务: 网络框架搭建
     {
         id: "task-12",
+        itemType: "task",
+        parentRequirementId: "req-5",
         title: "网络框架搭建",
         description: "实现客户端与服务端网络通信框架",
         status: "in-progress",
@@ -535,23 +945,49 @@ const mockTasks: Task[] = [
         dueDate: "2026-05-23T00:00:00Z",
         projectId: "proj-2",
         assigneeId: "user-3",
-        createdAt: "2026-05-07T09:00:00Z",
+        createdAt: "2026-05-07T00:00:00Z",
         updatedAt: "2026-05-15T16:00:00Z",
         stage: "preliminary",
         planningId: "plan-5",
         participants: [
-            // Bob(user-3) 重叠: task-12(5/7~5/23) + task-2(5/14~5/22)跨项目
-            { roleType: "server", memberId: "user-3", startTime: "2026-05-07T09:00:00Z", endTime: "2026-05-23T18:00:00Z" },
-            { roleType: "client", memberId: "user-13", startTime: "2026-05-11T09:00:00Z", endTime: "2026-05-23T18:00:00Z" },
+            { roleType: "server", memberId: "user-3", startTime: "2026-05-07T00:00:00Z", endTime: "2026-05-23T12:00:00Z" },
+            { roleType: "client", memberId: "user-13", startTime: "2026-05-11T00:00:00Z", endTime: "2026-05-23T12:00:00Z" },
         ],
         references: [],
         comments: [
             { id: "com-3", authorId: "user-3", content: "网络同步方案已确定", createdAt: "2026-05-15T10:00:00Z" },
         ],
     },
+
     // --- 场景与渲染优化 (plan-6) ---
+
+    // 需求单: 场景渲染系统
+    {
+        id: "req-6",
+        itemType: "requirement",
+        parentRequirementId: null,
+        title: "场景渲染系统",
+        description: "开发场景渲染相关系统，包括材质、植被、天气效果",
+        status: "in-progress",
+        priority: "high",
+        dueDate: null,
+        projectId: "proj-2",
+        assigneeId: null,
+        createdAt: "2026-05-06T10:00:00Z",
+        updatedAt: "2026-05-22T11:00:00Z",
+        stage: "initial",
+        planningId: "plan-6",
+        participants: [],
+        references: [
+            { type: "design", url: "https://figma.com/pbr-materials", title: "PBR材质规范" },
+        ],
+        comments: [],
+    },
+    // 子任务: PBR材质系统
     {
         id: "task-13",
+        itemType: "task",
+        parentRequirementId: "req-6",
         title: "PBR材质系统",
         description: "建立统一的PBR材质工作流和规范",
         status: "in-progress",
@@ -564,17 +1000,17 @@ const mockTasks: Task[] = [
         stage: "initial",
         planningId: "plan-6",
         participants: [
-            // Lisa(user-8) 重叠: task-13(5/6~5/28) + task-5(5/18~5/27)跨项目, 重叠日 5/18~5/27
-            { roleType: "artist", memberId: "user-8", startTime: "2026-05-06T09:00:00Z", endTime: "2026-05-28T18:00:00Z" },
-            { roleType: "artist", memberId: "user-9", startTime: "2026-05-06T09:00:00Z", endTime: "2026-05-20T18:00:00Z" },
+            { roleType: "artist", memberId: "user-8", startTime: "2026-05-06T00:00:00Z", endTime: "2026-05-28T12:00:00Z" },
+            { roleType: "artist", memberId: "user-9", startTime: "2026-05-06T00:00:00Z", endTime: "2026-05-20T12:00:00Z" },
         ],
-        references: [
-            { type: "design", url: "https://figma.com/pbr-materials", title: "PBR材质规范" },
-        ],
+        references: [],
         comments: [],
     },
+    // 子任务: 大规模植被渲染
     {
         id: "task-14",
+        itemType: "task",
+        parentRequirementId: "req-6",
         title: "大规模植被渲染",
         description: "实现百万级树木植被的高效渲染",
         status: "in-progress",
@@ -582,20 +1018,22 @@ const mockTasks: Task[] = [
         dueDate: "2026-05-30T00:00:00Z",
         projectId: "proj-2",
         assigneeId: "user-9",
-        createdAt: "2026-05-12T09:00:00Z",
+        createdAt: "2026-05-12T00:00:00Z",
         updatedAt: "2026-05-22T11:00:00Z",
         stage: "preliminary",
         planningId: "plan-6",
         participants: [
-            { roleType: "server", memberId: "user-12", startTime: "2026-05-18T09:00:00Z", endTime: "2026-05-30T18:00:00Z" },
-            // Tom(user-9) 重叠: task-13(5/6~5/20) + task-14(5/15~5/30), 重叠日 5/15~5/20
-            { roleType: "artist", memberId: "user-9", startTime: "2026-05-15T09:00:00Z", endTime: "2026-05-30T18:00:00Z" },
+            { roleType: "server", memberId: "user-12", startTime: "2026-05-18T00:00:00Z", endTime: "2026-05-30T12:00:00Z" },
+            { roleType: "artist", memberId: "user-9", startTime: "2026-05-15T00:00:00Z", endTime: "2026-05-30T12:00:00Z" },
         ],
         references: [],
         comments: [],
     },
+    // 子任务: 动态天气系统
     {
         id: "task-15",
+        itemType: "task",
+        parentRequirementId: "req-6",
         title: "动态天气系统",
         description: "实现雨、雪、风、雾等天气效果",
         status: "todo",
@@ -608,9 +1046,8 @@ const mockTasks: Task[] = [
         stage: "filed",
         planningId: "plan-6",
         participants: [
-            // Mia(user-16) 重叠: task-5(5/18~5/27) + task-15(5/25~6/8), 重叠日 5/25~5/27
-            { roleType: "animator", memberId: "user-16", startTime: "2026-05-25T09:00:00Z", endTime: "2026-06-08T18:00:00Z" },
-            { roleType: "server", memberId: "user-12", startTime: "2026-05-28T09:00:00Z", endTime: "2026-06-08T18:00:00Z" },
+            { roleType: "animator", memberId: "user-16", startTime: "2026-05-25T00:00:00Z", endTime: "2026-06-08T12:00:00Z" },
+            { roleType: "server", memberId: "user-12", startTime: "2026-05-28T00:00:00Z", endTime: "2026-06-08T12:00:00Z" },
         ],
         references: [],
         comments: [],
@@ -618,9 +1055,9 @@ const mockTasks: Task[] = [
 ];
 
 // Storage for mock data (simulates server-side persistence)
-let projects: Project[] = [...mockProjects];
+let projects: Project[] = mockProjects.map(normalizeProject);
 let plannings: Planning[] = [...mockPlannings];
-let tasks: Task[] = [...mockTasks];
+let tasks: Task[] = mockTasks.map(normalizeTask);
 let users: User[] = [...mockUsers];
 let taskHistories: TaskHistory[] = [];
 
@@ -674,14 +1111,15 @@ export const mockApi = {
 
     // Projects
     // Projects
-    getProjects: (): Project[] => [...projects],
+    getProjects: (): Project[] => projects.map(normalizeProject),
 
     createProject: (data: Omit<Project, "id" | "createdAt">): Project => {
-        const project: Project = {
+        const project: Project = normalizeProject({
             ...data,
+            phaseTemplates: data.phaseTemplates || createDefaultPhaseTemplates(),
             id: generateId(),
             createdAt: new Date().toISOString(),
-        };
+        });
         projects.push(project);
         trigger("project:create", project);
         return project;
@@ -690,7 +1128,7 @@ export const mockApi = {
     updateProject: (id: string, data: Partial<Project>): Project | null => {
         const index = projects.findIndex((p) => p.id === id);
         if (index === -1) return null;
-        projects[index] = { ...projects[index], ...data };
+        projects[index] = normalizeProject({ ...projects[index], ...data });
         trigger("project:update", projects[index]);
         return projects[index];
     },
@@ -742,16 +1180,16 @@ export const mockApi = {
     },
 
     // Tasks
-    getTasks: (): Task[] => [...tasks],
+    getTasks: (): Task[] => tasks.map(normalizeTask),
 
     getTasksByProject: (projectId: string): Task[] =>
-        tasks.filter((t) => t.projectId === projectId),
+        tasks.filter((t) => t.projectId === projectId).map(normalizeTask),
 
     getTasksByStatus: (status: TaskStatus): Task[] =>
-        tasks.filter((t) => t.status === status),
+        tasks.filter((t) => t.status === status).map(normalizeTask),
 
     getTasksByPlanning: (planningId: string): Task[] =>
-        tasks.filter((t) => t.planningId === planningId),
+        tasks.filter((t) => t.planningId === planningId).map(normalizeTask),
 
     createTask: (data: Omit<Task, "id" | "createdAt" | "updatedAt">): Task => {
         const task: Task = {
@@ -760,19 +1198,20 @@ export const mockApi = {
             createdAt: new Date().toISOString(),
             updatedAt: new Date().toISOString(),
         };
-        tasks.push(task);
-        trigger("task:create", task);
-        return task;
+        const normalized = normalizeTask(task);
+        tasks.push(normalized);
+        trigger("task:create", normalized);
+        return normalized;
     },
 
     updateTask: (id: string, data: Partial<Task>): Task | null => {
         const index = tasks.findIndex((t) => t.id === id);
         if (index === -1) return null;
-        tasks[index] = {
+        tasks[index] = normalizeTask({
             ...tasks[index],
             ...data,
             updatedAt: new Date().toISOString(),
-        };
+        });
         trigger("task:update", tasks[index]);
         return tasks[index];
     },
@@ -816,17 +1255,17 @@ export const mockApi = {
 
     // Sync initial data
     getInitialData: () => ({
-        projects: [...projects],
+        projects: projects.map(normalizeProject),
         plannings: [...plannings],
-        tasks: [...tasks],
+        tasks: tasks.map(normalizeTask),
         users: [...users],
     }),
 
     // Reset to initial state
     reset: (): void => {
-        projects = [...mockProjects];
+        projects = mockProjects.map(normalizeProject);
         plannings = [...mockPlannings];
-        tasks = [...mockTasks];
+        tasks = mockTasks.map(normalizeTask);
         users = [...mockUsers];
         taskHistories = [];
     },

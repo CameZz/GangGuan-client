@@ -12,6 +12,20 @@ const taskStore = useTaskStore()
 
 const currentProject = computed(() => projectStore.currentProject)
 const selectedPlanningId = computed(() => projectStore.selectedPlanningId)
+const planningSyncedRouteNames = [
+  'Dashboard',
+  'ProjectDashboard',
+  'Kanban',
+  'ProjectKanban',
+  'List',
+  'ProjectList',
+  'Timeline',
+  'ProjectTimeline',
+  'MemberSchedule',
+  'ProjectMemberSchedule',
+  'Members',
+  'ProjectMembers'
+]
 
 // Collapse state
 const incompleteExpanded = ref(true)
@@ -74,6 +88,9 @@ watch(() => route.query.planning, (newPlanning) => {
 // Update route when selectedPlanningId changes from store
 watch(selectedPlanningId, (newId) => {
   if (newId && currentProject.value) {
+    const routeName = String(route.name || '')
+    if (!planningSyncedRouteNames.includes(routeName)) return
+
     let currentPath = route.path.split('/')[1]
     // If on projects page or root, default to kanban
     if (currentPath === 'projects' || currentPath === '') {

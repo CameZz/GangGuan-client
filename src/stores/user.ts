@@ -11,6 +11,7 @@ export const useUserStore = defineStore('user', () => {
 
   const isLoggedIn = computed(() => !!currentUser.value)
   const isAdmin = computed(() => currentUser.value?.isAdmin ?? false)
+  const isProjectManager = computed(() => isAdmin.value || currentUser.value?.role === 'pm')
 
   function init() {
     isLoading.value = true
@@ -70,6 +71,7 @@ export const useUserStore = defineStore('user', () => {
     isLoading,
     isLoggedIn,
     isAdmin,
+    isProjectManager,
     init,
     login,
     logout,

@@ -69,7 +69,7 @@ const routes: RouteRecordRaw[] = [
     path: '/project/:id',
     name: 'ProjectDetail',
     component: () => import('@/views/ProjectDetailView.vue'),
-    meta: { requiresAuth: true, requiresProject: true }
+    meta: { requiresAuth: true, requiresProject: true, requiresProjectManager: true }
   },
   {
     path: '/timeline',
@@ -118,11 +118,30 @@ const router = createRouter({
 router.beforeEach((to, _from, next) => {
   const userStore = useUserStore()
   const projectStore = useProjectStore()
+  if (!userStore.isLoggedIn) {
+    userStore.init()
+  }
+  const canManageProject = userStore.isAdmin || userStore.currentUser?.role === 'pm'
+  const routeProjectId = typeof to.params.projectId === 'string'
+    ? to.params.projectId
+    : typeof to.params.id === 'string'
+      ? to.params.id
+      : null
 
   if (to.meta.requiresAuth !== false && !userStore.isLoggedIn) {
     next('/login')
   } else if (to.meta.requiresAdmin && !userStore.isAdmin) {
     next('/')
+  } else if (to.meta.requiresProject && !projectStore.currentProjectId && routeProjectId) {
+    projectStore.setCurrentProject(routeProjectId)
+    if (to.meta.requiresProjectManager && !canManageProject) {
+      next(`/kanban/${routeProjectId}`)
+    } else {
+      next()
+    }
+  } else if (to.meta.requiresProjectManager && !canManageProject) {
+    const redirectProjectId = routeProjectId || projectStore.currentProjectId
+    next(redirectProjectId ? `/kanban/${redirectProjectId}` : '/projects')
   } else if (to.meta.requiresProject && !projectStore.currentProjectId) {
     next('/projects')
   } else {

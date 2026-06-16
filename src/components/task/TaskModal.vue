@@ -1,30 +1,37 @@
 <script setup lang="ts">
 import { ref, watch, computed } from 'vue'
-import type { Task, TaskStatus, TaskPriority, TaskStage, Participant, Reference, Comment, RoleType, TaskHistory } from '@/types'
-import { HISTORY_FIELD_LABELS } from '@/types'
-import { useMemberStore, usePlanningStore, useTaskStore } from '@/stores'
-import { TASK_STAGES, ROLES } from '@/types'
+import type { Task, TaskStatus, TaskPriority, TaskStage, TaskPhase, Participant, Reference, Comment, RoleType, TaskHistory, TaskItemType } from '@/types'
+import { HISTORY_FIELD_LABELS, ROLES } from '@/types'
+import { useMemberStore, usePlanningStore, useProjectStore, useTaskStore, useUserStore } from '@/stores'
+import { createTaskPhaseFromTemplate, getPhaseStatus, getTaskPhaseProgress, getTaskStageLabel, normalizeTaskPhases } from '@/utils/taskPhases'
 import MemberAvatar from '@/components/member/MemberAvatar.vue'
 
 const props = defineProps<{
   task?: Task | null
   isOpen: boolean
+  projectId?: string
+  initialParentRequirementId?: string | null
 }>()
 
 const emit = defineEmits<{
   close: []
   save: [task: Partial<Task>]
   delete: [id: string]
+  createChild: [requirementId: string]
 }>()
 
 const memberStore = useMemberStore()
 const planningStore = usePlanningStore()
+const projectStore = useProjectStore()
 const taskStore = useTaskStore()
+const userStore = useUserStore()
 
 const members = computed(() => memberStore.members)
 const plannings = computed(() => planningStore.plannings)
 
 const form = ref({
+  itemType: 'task' as TaskItemType,
+  parentRequirementId: null as string | null,
   title: '',
   description: '',
   status: 'todo' as TaskStatus,
@@ -32,18 +39,25 @@ const form = ref({
   dueDate: '',
   assigneeId: null as string | null,
   stage: 'filed' as TaskStage,
+  phases: [] as TaskPhase[],
+  currentPhaseId: null as string | null,
   planningId: null as string | null,
   participants: [] as Participant[],
   references: [] as Reference[],
-  comments: [] as Comment[]
+  comments: [] as Comment[],
+  projectId: ''
 })
 
-const activeTab = ref<'main' | 'participants' | 'references' | 'comments' | 'history'>('main')
+const activeTab = ref<'main' | 'participants' | 'children' | 'references' | 'comments' | 'history'>('main')
+const deleteError = ref('')
+const phaseTemplateToAdd = ref('')
 
-watch(() => props.isOpen, (open) => {
+watch([() => props.isOpen, () => props.task, () => props.initialParentRequirementId], ([open]) => {
   if (open && props.task) {
     loadHistories()
     form.value = {
+      itemType: props.task.itemType || 'task',
+      parentRequirementId: props.task.parentRequirementId || null,
       title: props.task.title,
       description: props.task.description,
       status: props.task.status,
@@ -51,13 +65,23 @@ watch(() => props.isOpen, (open) => {
       dueDate: props.task.dueDate ? props.task.dueDate.split('T')[0] : '',
       assigneeId: props.task.assigneeId,
       stage: props.task.stage || 'filed',
+      phases: normalizeTaskPhases(props.task.phases),
+      currentPhaseId: props.task.currentPhaseId || null,
       planningId: props.task.planningId || null,
       participants: [...(props.task.participants || [])],
       references: [...(props.task.references || [])],
-      comments: [...(props.task.comments || [])]
+      comments: [...(props.task.comments || [])],
+      projectId: props.task.projectId
     }
   } else if (open) {
+    const parentRequirement = props.initialParentRequirementId
+      ? taskStore.tasks.find(t => t.id === props.initialParentRequirementId)
+      : null
+    const projectId = parentRequirement?.projectId || props.projectId || ''
+    const phases = taskStore.buildTaskPhasesFromTemplates(projectId)
     form.value = {
+      itemType: 'task',
+      parentRequirementId: parentRequirement?.id || null,
       title: '',
       description: '',
       status: 'todo',
@@ -65,40 +89,135 @@ watch(() => props.isOpen, (open) => {
       dueDate: '',
       assigneeId: null,
       stage: 'filed',
+      phases,
+      currentPhaseId: null,
       planningId: null,
       participants: [
         { roleType: 'pm', memberId: '', startTime: null, endTime: null },
         { roleType: 'tester', memberId: '', startTime: null, endTime: null }
       ],
       references: [],
-      comments: []
+      comments: [],
+      projectId
     }
+  }
+  if (open) {
+    activeTab.value = 'main'
+    deleteError.value = ''
+    phaseTemplateToAdd.value = ''
   }
 })
 
 const isEditing = computed(() => !!props.task)
+const isRequirementItem = computed(() => form.value.itemType === 'requirement')
+const isTaskItem = computed(() => form.value.itemType !== 'requirement')
+const isChildTaskCreation = computed(() => !!props.initialParentRequirementId && !props.task)
+
+const requirementOptions = computed(() => {
+  if (!form.value.projectId) return []
+  return taskStore.getRequirementsByProject(form.value.projectId)
+    .filter(requirement => requirement.id !== props.task?.id)
+})
+
+const childTasks = computed(() => {
+  if (!props.task?.id || !isRequirementItem.value) return []
+  return taskStore.getChildTasks(props.task.id)
+})
+
+const deleteBlockedReason = computed(() => {
+  if (props.task && isRequirementItem.value && childTasks.value.length > 0) {
+    return `该需求单下还有 ${childTasks.value.length} 个任务单，请先移出或删除子任务`
+  }
+  return ''
+})
 
 const availableMembers = computed(() => {
   return members.value
 })
 
+const phaseTemplates = computed(() => {
+  if (!form.value.projectId) return []
+  return projectStore.getEnabledPhaseTemplates(form.value.projectId)
+})
+
+const availablePhaseTemplates = computed(() => {
+  const selectedTemplateIds = new Set(form.value.phases.map(phase => phase.templateId))
+  return phaseTemplates.value.filter(template => !selectedTemplateIds.has(template.id))
+})
+
+const phaseProgress = computed(() => getTaskPhaseProgress(form.value.phases))
+
+const currentPhaseLabel = computed(() => getTaskStageLabel({
+  phases: form.value.phases,
+  stage: form.value.stage,
+  status: form.value.status
+}))
+
+const currentDisplayPhase = computed(() => {
+  return form.value.phases.find(phase => phase.id === form.value.currentPhaseId) ||
+    form.value.phases.find(phase => phase.progress < 100) ||
+    form.value.phases[0] ||
+    null
+})
+
+const currentDisplayAssignee = computed(() => {
+  return currentDisplayPhase.value ? getPhaseAssignee(currentDisplayPhase.value) : null
+})
+
 function handleSubmit() {
-  const taskData: Partial<Task> = {
-    ...form.value,
-    dueDate: form.value.dueDate ? new Date(form.value.dueDate).toISOString() : null
-  }
+  const phases = isTaskItem.value && form.value.phases.length === 0
+    ? taskStore.buildTaskPhasesFromTemplates(form.value.projectId)
+    : normalizeTaskPhases(form.value.phases)
+  const taskData: Partial<Task> = isRequirementItem.value
+    ? {
+        ...form.value,
+        parentRequirementId: null,
+        status: 'todo',
+        dueDate: null,
+        assigneeId: null,
+        stage: 'filed',
+        participants: [],
+        phases: [],
+        currentPhaseId: null
+      }
+    : {
+        ...form.value,
+        parentRequirementId: form.value.parentRequirementId || null,
+        dueDate: form.value.dueDate ? new Date(form.value.dueDate).toISOString() : null,
+        phases
+      }
   emit('save', taskData)
 }
 
 function handleDelete() {
+  deleteError.value = ''
+  if (deleteBlockedReason.value) {
+    deleteError.value = deleteBlockedReason.value
+    return
+  }
   if (props.task?.id) {
     emit('delete', props.task.id)
   }
 }
 
-function selectMember(memberId: string | null) {
-  form.value.assigneeId = memberId
-  showMemberDropdown.value = false
+function handleItemTypeChange(itemType: TaskItemType) {
+  form.value.itemType = itemType
+  if (itemType === 'requirement') {
+    form.value.parentRequirementId = null
+    form.value.assigneeId = null
+    form.value.dueDate = ''
+    form.value.participants = []
+    form.value.phases = []
+    form.value.currentPhaseId = null
+  } else if (form.value.participants.length === 0) {
+    form.value.participants = [
+      { roleType: 'pm', memberId: '', startTime: null, endTime: null },
+      { roleType: 'tester', memberId: '', startTime: null, endTime: null }
+    ]
+    if (form.value.phases.length === 0) {
+      form.value.phases = taskStore.buildTaskPhasesFromTemplates(form.value.projectId)
+    }
+  }
 }
 
 function addParticipant() {
@@ -156,12 +275,6 @@ function getMemberName(memberId: string): string {
 }
 
 const taskHistories = ref<TaskHistory[]>([])
-const showMemberDropdown = ref(false)
-
-const currentAssignee = computed(() => {
-  if (!form.value.assigneeId) return null
-  return members.value.find(m => m.id === form.value.assigneeId) || null
-})
 
 function loadHistories() {
   if (props.task?.id) {
@@ -169,8 +282,61 @@ function loadHistories() {
   }
 }
 
+function addTaskPhase() {
+  const template = phaseTemplates.value.find(item => item.id === phaseTemplateToAdd.value)
+  if (!template) return
+  form.value.phases.push(createTaskPhaseFromTemplate(template, form.value.phases.length))
+  phaseTemplateToAdd.value = ''
+}
+
+function removeTaskPhase(index: number) {
+  form.value.phases.splice(index, 1)
+  reorderTaskPhases()
+}
+
+function moveTaskPhase(index: number, direction: 'up' | 'down') {
+  const targetIndex = direction === 'up' ? index - 1 : index + 1
+  if (targetIndex < 0 || targetIndex >= form.value.phases.length) return
+  const [phase] = form.value.phases.splice(index, 1)
+  form.value.phases.splice(targetIndex, 0, phase)
+  reorderTaskPhases()
+}
+
+function reorderTaskPhases() {
+  form.value.phases = form.value.phases.map((phase, order) => ({ ...phase, order }))
+}
+
+function updateTaskPhaseAssignee(index: number, assigneeId: string) {
+  form.value.phases[index].assigneeId = assigneeId || null
+}
+
+function updateTaskPhaseProgress(index: number, progress: number) {
+  const value = Math.min(100, Math.max(0, Math.round(progress)))
+  form.value.phases[index].progress = value
+  form.value.phases[index].status = getPhaseStatus(value)
+}
+
+function canEditPhaseProgress(phase: TaskPhase): boolean {
+  return taskStore.canEditTaskPhaseProgress(phase, userStore.currentUser?.id)
+}
+
+function getPhaseAssignee(phase: TaskPhase | null | undefined) {
+  if (!phase?.assigneeId) return null
+  return members.value.find(member => member.id === phase.assigneeId) || null
+}
+
 function getHistoryFieldLabel(field: string): string {
   return HISTORY_FIELD_LABELS[field] || field
+}
+
+function getStatusLabel(status: TaskStatus): string {
+  const labels: Record<TaskStatus, string> = {
+    todo: '待办',
+    'in-progress': '进行中',
+    done: '已完成',
+    abandoned: '已废弃'
+  }
+  return labels[status]
 }
 </script>
 
@@ -178,7 +344,7 @@ function getHistoryFieldLabel(field: string): string {
   <div v-if="isOpen" class="modal-overlay" @click.self="emit('close')">
     <div class="modal modal-lg">
       <div class="modal-header">
-        <h2 class="modal-title">{{ isEditing ? '编辑任务' : '新建任务' }}</h2>
+        <h2 class="modal-title">{{ isEditing ? (isRequirementItem ? '编辑需求单' : '编辑任务单') : '新建单据' }}</h2>
         <button class="btn btn-ghost" @click="emit('close')">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M18 6L6 18M6 6l12 12" />
@@ -193,10 +359,17 @@ function getHistoryFieldLabel(field: string): string {
           @click="activeTab = 'main'"
         >基本信息</button>
         <button
+          v-if="isEditing && isRequirementItem"
+          class="tab"
+          :class="{ active: activeTab === 'children' }"
+          @click="activeTab = 'children'"
+        >拆分任务 ({{ childTasks.length }})</button>
+        <button
+          v-if="isTaskItem"
           class="tab"
           :class="{ active: activeTab === 'participants' }"
           @click="activeTab = 'participants'"
-        >参与者 ({{ form.participants.length }})</button>
+        >阶段进度 ({{ form.phases.length }})</button>
         <button
           class="tab"
           :class="{ active: activeTab === 'references' }"
@@ -215,8 +388,28 @@ function getHistoryFieldLabel(field: string): string {
         >历史记录</button>
       </div>
 
-      <div class="modal-body" @click="showMemberDropdown = false">
+      <div class="modal-body">
         <div v-show="activeTab === 'main'">
+          <div v-if="!isEditing" class="form-group">
+            <label class="label">单据类型</label>
+            <div class="type-selector">
+              <button
+                class="type-option"
+                :class="{ active: form.itemType === 'requirement' }"
+                :disabled="isChildTaskCreation"
+                @click="handleItemTypeChange('requirement')"
+              >
+                需求单
+              </button>
+              <button
+                class="type-option"
+                :class="{ active: form.itemType === 'task' }"
+                @click="handleItemTypeChange('task')"
+              >
+                任务单
+              </button>
+            </div>
+          </div>
           <div class="form-group">
             <label class="label">标题</label>
             <input
@@ -235,7 +428,7 @@ function getHistoryFieldLabel(field: string): string {
             ></textarea>
           </div>
           <div class="form-row">
-            <div class="form-group">
+            <div v-if="isTaskItem" class="form-group">
               <label class="label">状态</label>
               <select v-model="form.status" class="input select">
                 <option value="todo">待办</option>
@@ -262,57 +455,134 @@ function getHistoryFieldLabel(field: string): string {
               </option>
             </select>
           </div>
-          <div class="form-row">
+          <div v-if="isTaskItem && requirementOptions.length > 0" class="form-group">
+            <label class="label">所属需求</label>
+            <select v-model="form.parentRequirementId" class="input select">
+              <option :value="null">不归属需求单</option>
+              <option v-for="requirement in requirementOptions" :key="requirement.id" :value="requirement.id">
+                {{ requirement.title }}
+              </option>
+            </select>
+          </div>
+          <div v-if="isTaskItem" class="form-group">
+            <label class="label">任务阶段计划</label>
+            <div class="phase-plan">
+              <div class="phase-plan-summary">
+                <span>当前：{{ currentPhaseLabel }}</span>
+                <span>{{ phaseProgress.done }}/{{ phaseProgress.total }} · {{ phaseProgress.percent }}%</span>
+              </div>
+              <div class="phase-add-row">
+                <select v-model="phaseTemplateToAdd" class="input select">
+                  <option value="">选择阶段</option>
+                  <option v-for="template in availablePhaseTemplates" :key="template.id" :value="template.id">
+                    {{ template.name }}
+                  </option>
+                </select>
+                <button class="btn btn-secondary btn-sm" :disabled="!phaseTemplateToAdd" @click="addTaskPhase">添加阶段</button>
+              </div>
+              <div class="phase-plan-list">
+                <div
+                  v-for="(phase, index) in form.phases"
+                  :key="phase.id"
+                  class="phase-plan-row"
+                >
+                  <div class="phase-order">{{ index + 1 }}</div>
+                  <div class="phase-main">
+                    <div class="phase-title">{{ phase.name }}</div>
+                    <div class="phase-progress-text">{{ phase.progress }}%</div>
+                  </div>
+                  <select
+                    :value="phase.assigneeId || ''"
+                    class="input select phase-assignee-select"
+                    @change="updateTaskPhaseAssignee(index, ($event.target as HTMLSelectElement).value)"
+                  >
+                    <option value="">选择执行者</option>
+                    <option v-for="member in availableMembers" :key="member.id" :value="member.id">
+                      {{ member.name }}
+                    </option>
+                  </select>
+                  <div class="phase-row-actions">
+                    <button class="btn btn-ghost btn-sm" :disabled="index === 0" @click="moveTaskPhase(index, 'up')">上移</button>
+                    <button class="btn btn-ghost btn-sm" :disabled="index === form.phases.length - 1" @click="moveTaskPhase(index, 'down')">下移</button>
+                    <button class="btn btn-ghost btn-sm" @click="removeTaskPhase(index)">删除</button>
+                  </div>
+                </div>
+                <div v-if="form.phases.length === 0" class="phase-empty">暂无阶段</div>
+              </div>
+            </div>
+          </div>
+          <div v-if="isTaskItem" class="form-row">
             <div class="form-group">
               <label class="label">截止日期</label>
               <input v-model="form.dueDate" type="date" class="input" />
             </div>
             <div class="form-group">
-              <label class="label">任务阶段</label>
-              <select v-model="form.stage" class="input select">
-                <option v-for="stage in TASK_STAGES" :key="stage.value" :value="stage.value">
-                  {{ stage.label }}
-                </option>
-              </select>
-            </div>
-          </div>
-          <div class="form-group">
-            <label class="label">负责人</label>
-            <div class="member-selector" @click.stop>
-              <div class="member-trigger" @click="showMemberDropdown = !showMemberDropdown">
-                <div class="member-trigger-info">
-                  <MemberAvatar :member="currentAssignee" size="sm" />
-                  <span>{{ currentAssignee?.name || '未分配' }}</span>
-                </div>
-                <svg class="member-trigger-arrow" :class="{ open: showMemberDropdown }" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <path d="M6 9l6 6 6-6" />
-                </svg>
-              </div>
-              <div v-show="showMemberDropdown" class="member-dropdown">
-                <div
-                  class="member-option"
-                  :class="{ selected: form.assigneeId === null }"
-                  @click="selectMember(null)"
-                >
-                  <MemberAvatar :member="null" size="sm" />
-                  <span>未分配</span>
-                </div>
-                <div
-                  v-for="member in members"
-                  :key="member.id"
-                  class="member-option"
-                  :class="{ selected: form.assigneeId === member.id }"
-                  @click="selectMember(member.id)"
-                >
-                  <MemberAvatar :member="member" size="sm" />
-                  <span>{{ member.name }}</span>
-                </div>
+              <label class="label">当前执行者</label>
+              <div class="readonly-field">
+                <MemberAvatar :member="currentDisplayAssignee" size="sm" />
+                <span>{{ currentDisplayAssignee?.name || '未分配' }}</span>
               </div>
             </div>
           </div>
         </div>
 
-        <div v-show="activeTab === 'participants'" class="tab-content">
+        <div v-show="activeTab === 'children'" class="tab-content">
+          <div class="child-task-list">
+            <div v-if="childTasks.length === 0" class="child-empty">暂无拆分任务</div>
+            <div
+              v-for="child in childTasks"
+              :key="child.id"
+              class="child-task-item"
+            >
+              <div>
+                <div class="child-task-title">{{ child.title }}</div>
+                <div class="child-task-meta">{{ getStatusLabel(child.status) }}</div>
+              </div>
+              <span class="badge" :class="`badge-${child.priority}`">
+                {{ child.priority === 'low' ? '低' : child.priority === 'medium' ? '中' : '高' }}
+              </span>
+            </div>
+          </div>
+          <button v-if="props.task?.id" class="btn btn-secondary" @click="emit('createChild', props.task.id)">
+            新增任务单
+          </button>
+        </div>
+
+        <div v-show="activeTab === 'participants' && isTaskItem" class="tab-content">
+          <div class="phase-progress-list">
+            <div
+              v-for="(phase, index) in form.phases"
+              :key="phase.id"
+              class="phase-progress-item"
+            >
+              <div class="phase-progress-header">
+                <div class="phase-progress-member">
+                  <MemberAvatar :member="getPhaseAssignee(phase)" size="sm" />
+                  <div>
+                    <div class="phase-progress-title">{{ phase.name }}</div>
+                    <div class="phase-progress-assignee">{{ getPhaseAssignee(phase)?.name || '未分配' }}</div>
+                  </div>
+                </div>
+                <span class="phase-progress-value">{{ phase.progress }}%</span>
+              </div>
+              <div class="phase-progress-control">
+                <input
+                  type="range"
+                  min="0"
+                  max="100"
+                  step="1"
+                  :value="phase.progress"
+                  :disabled="!canEditPhaseProgress(phase)"
+                  @input="updateTaskPhaseProgress(index, Number(($event.target as HTMLInputElement).value))"
+                />
+                <div class="phase-progress-bar">
+                  <div class="phase-progress-fill" :style="{ width: `${phase.progress}%` }"></div>
+                </div>
+              </div>
+            </div>
+            <div v-if="form.phases.length === 0" class="phase-empty">暂无阶段进度</div>
+          </div>
+          <div class="section-divider"></div>
           <div class="participant-list">
             <div
               v-for="(participant, index) in form.participants"
@@ -449,7 +719,8 @@ function getHistoryFieldLabel(field: string): string {
       </div>
 
       <div class="modal-footer">
-        <button v-if="isEditing" class="btn btn-danger" @click="handleDelete">删除</button>
+        <div v-if="deleteError" class="delete-error">{{ deleteError }}</div>
+        <button v-if="isEditing" class="btn btn-danger" :disabled="!!deleteBlockedReason" @click="handleDelete">删除</button>
         <div class="spacer"></div>
         <button class="btn btn-secondary" @click="emit('close')">取消</button>
         <button class="btn btn-primary" @click="handleSubmit">保存</button>
@@ -497,10 +768,216 @@ function getHistoryFieldLabel(field: string): string {
   padding: 16px 0;
 }
 
+.type-selector {
+  display: inline-flex;
+  gap: 4px;
+  padding: 4px;
+  background-color: var(--color-bg-tertiary);
+  border-radius: var(--radius-md);
+}
+
+.type-option {
+  min-width: 96px;
+  padding: 8px 14px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  font-size: 14px;
+  transition: all var(--transition-fast);
+}
+
+.type-option.active {
+  background-color: var(--color-bg-primary);
+  color: var(--color-primary);
+  box-shadow: var(--shadow-sm);
+}
+
+.type-option:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
 .form-row {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 16px;
+}
+
+.phase-plan {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background-color: var(--color-bg-secondary);
+}
+
+.phase-plan-summary {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 13px;
+  color: var(--color-text-secondary);
+}
+
+.phase-add-row {
+  display: flex;
+  gap: 8px;
+}
+
+.phase-add-row .select {
+  flex: 1;
+}
+
+.phase-plan-list,
+.phase-progress-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.phase-plan-row {
+  display: grid;
+  grid-template-columns: 32px 1fr minmax(160px, 220px) auto;
+  align-items: center;
+  gap: 8px;
+  padding: 8px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background-color: var(--color-bg-primary);
+}
+
+.phase-order {
+  width: 26px;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-sm);
+  background-color: var(--color-bg-tertiary);
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.phase-main {
+  min-width: 0;
+}
+
+.phase-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.phase-progress-text {
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--color-text-muted);
+}
+
+.phase-row-actions {
+  display: flex;
+  gap: 4px;
+}
+
+.phase-assignee-select {
+  width: 100%;
+}
+
+.phase-empty {
+  padding: 14px;
+  text-align: center;
+  color: var(--color-text-muted);
+  border: 1px dashed var(--color-border);
+  border-radius: var(--radius-sm);
+  background-color: var(--color-bg-primary);
+  font-size: 13px;
+}
+
+.readonly-field {
+  min-height: 38px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background-color: var(--color-bg-tertiary);
+  color: var(--color-text-secondary);
+  font-size: 14px;
+}
+
+.phase-progress-item {
+  padding: 12px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background-color: var(--color-bg-tertiary);
+}
+
+.phase-progress-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.phase-progress-member {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.phase-progress-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.phase-progress-assignee,
+.phase-progress-value {
+  font-size: 12px;
+  color: var(--color-text-muted);
+}
+
+.phase-progress-control {
+  display: grid;
+  grid-template-columns: 160px 1fr;
+  gap: 10px;
+  align-items: center;
+}
+
+.phase-progress-control input[type="range"] {
+  width: 100%;
+  accent-color: var(--color-primary);
+}
+
+.phase-progress-control input[type="range"]:disabled {
+  opacity: 0.45;
+}
+
+.phase-progress-bar {
+  height: 8px;
+  overflow: hidden;
+  border-radius: var(--radius-full);
+  background-color: var(--color-bg-primary);
+}
+
+.phase-progress-fill {
+  height: 100%;
+  border-radius: inherit;
+  background-color: var(--color-primary);
+}
+
+.section-divider {
+  height: 1px;
+  margin: 16px 0;
+  background-color: var(--color-border);
 }
 
 .member-selector {
@@ -663,9 +1140,21 @@ function getHistoryFieldLabel(field: string): string {
 .modal-footer {
   display: flex;
   gap: 8px;
+  align-items: center;
   padding-top: 16px;
   border-top: 1px solid var(--color-border);
   margin-top: auto;
+}
+
+.btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.delete-error {
+  font-size: 13px;
+  color: var(--color-danger);
+  margin-right: auto;
 }
 
 .btn-sm {
@@ -752,5 +1241,43 @@ function getHistoryFieldLabel(field: string): string {
   font-size: 12px;
   color: var(--color-text-muted);
   margin-top: 4px;
+}
+
+.child-task-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.child-empty {
+  padding: 24px;
+  text-align: center;
+  color: var(--color-text-muted);
+  background-color: var(--color-bg-tertiary);
+  border-radius: var(--radius-md);
+  font-size: 14px;
+}
+
+.child-task-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  background-color: var(--color-bg-tertiary);
+  border-radius: var(--radius-md);
+}
+
+.child-task-title {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--color-text-primary);
+}
+
+.child-task-meta {
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--color-text-muted);
 }
 </style>

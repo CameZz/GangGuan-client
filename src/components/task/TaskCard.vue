@@ -1,8 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import type { Task } from '@/types'
-import { TASK_STAGES } from '@/types'
-import { useMemberStore } from '@/stores'
+import { useMemberStore, useTaskStore } from '@/stores'
 import MemberAvatar from '@/components/member/MemberAvatar.vue'
 
 const props = defineProps<{
@@ -15,6 +14,9 @@ const emit = defineEmits<{
 }>()
 
 const memberStore = useMemberStore()
+const taskStore = useTaskStore()
+
+const isRequirement = computed(() => taskStore.isRequirement(props.task))
 
 const assignee = computed(() => {
   if (!props.task.assigneeId) return null
@@ -35,11 +37,13 @@ const priorityClass = computed(() => `badge-${props.task.priority}`)
 const statusClass = computed(() => `badge-${props.task.status}`)
 
 const stageLabel = computed(() => {
-  const stage = TASK_STAGES.find(s => s.value === props.task.stage)
-  return stage?.label || props.task.stage
+  return taskStore.getTaskStageLabel(props.task)
 })
 
+const taskPhaseProgress = computed(() => taskStore.getTaskPhaseProgress(props.task.phases))
+
 const formattedDueDate = computed(() => {
+  if (isRequirement.value) return null
   if (!props.task.dueDate) return null
   const date = new Date(props.task.dueDate)
   return date.toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' })
@@ -50,6 +54,17 @@ const isOverdue = computed(() => {
   return new Date(props.task.dueDate) < new Date()
 })
 
+const requirementProgress = computed(() => {
+  if (!isRequirement.value) return null
+  return taskStore.getRequirementProgress(props.task.id)
+})
+
+const progressText = computed(() => {
+  if (!requirementProgress.value) return ''
+  if (requirementProgress.value.total === 0) return '待拆分'
+  return `${requirementProgress.value.done}/${requirementProgress.value.total}`
+})
+
 function handleDragStart(e: DragEvent) {
   e.dataTransfer?.setData('text/plain', props.task.id)
   emit('dragstart', props.task)
@@ -57,14 +72,33 @@ function handleDragStart(e: DragEvent) {
 </script>
 
 <template>
-  <div class="task-card" draggable="true" @click="emit('click')" @dragstart="handleDragStart">
+  <div
+    class="task-card"
+    :class="{ 'task-card--requirement': isRequirement }"
+    draggable="true"
+    @click="emit('click')"
+    @dragstart="handleDragStart"
+  >
     <div class="task-header">
-      <span class="badge" :class="priorityClass">{{ priorityLabel }}</span>
-      <span class="task-stage">{{ stageLabel }}</span>
+      <span class="item-type" :class="{ requirement: isRequirement }">
+        {{ isRequirement ? '需求单' : '任务单' }}
+      </span>
+      <span v-if="!isRequirement" class="task-stage">{{ stageLabel }}</span>
+      <span v-else class="task-progress">{{ progressText }}</span>
     </div>
     <h4 class="task-title">{{ task.title }}</h4>
     <p v-if="task.description" class="task-description">{{ task.description }}</p>
+    <div v-if="isRequirement" class="requirement-summary">
+      拆分进度：{{ progressText }}
+    </div>
+    <div v-else-if="taskPhaseProgress.total > 0" class="task-phase-progress">
+      <div class="task-phase-progress-bar">
+        <div class="task-phase-progress-fill" :style="{ width: `${taskPhaseProgress.percent}%` }"></div>
+      </div>
+      <span>{{ taskPhaseProgress.done }}/{{ taskPhaseProgress.total }}</span>
+    </div>
     <div class="task-footer">
+      <span class="badge" :class="priorityClass">{{ priorityLabel }}</span>
       <div v-if="formattedDueDate" class="task-due" :class="{ overdue: isOverdue }">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <rect x="3" y="4" width="18" height="18" rx="2" />
@@ -72,7 +106,7 @@ function handleDragStart(e: DragEvent) {
         </svg>
         <span>{{ formattedDueDate }}</span>
       </div>
-      <MemberAvatar :member="assignee" size="sm" />
+      <MemberAvatar v-if="!isRequirement" :member="assignee" size="sm" />
     </div>
   </div>
 </template>
@@ -85,6 +119,11 @@ function handleDragStart(e: DragEvent) {
   padding: 12px;
   cursor: pointer;
   transition: all var(--transition-fast);
+}
+
+.task-card--requirement {
+  border-color: #94a3b8;
+  background-color: #f8fafc;
 }
 
 .task-card:hover {
@@ -103,11 +142,33 @@ function handleDragStart(e: DragEvent) {
   margin-bottom: 8px;
 }
 
+.item-type {
+  font-size: 11px;
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  background-color: #e0f2fe;
+  color: #0369a1;
+  font-weight: 600;
+}
+
+.item-type.requirement {
+  background-color: #e2e8f0;
+  color: #334155;
+}
+
 .task-stage {
   font-size: 11px;
   padding: 2px 6px;
   border-radius: var(--radius-sm);
   background-color: var(--color-bg-tertiary);
+  color: var(--color-text-secondary);
+}
+
+.task-progress {
+  font-size: 11px;
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  background-color: var(--color-bg-primary);
   color: var(--color-text-secondary);
 }
 
@@ -128,6 +189,35 @@ function handleDragStart(e: DragEvent) {
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
+}
+
+.requirement-summary {
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--color-text-secondary);
+}
+
+.task-phase-progress {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  font-size: 11px;
+  color: var(--color-text-muted);
+}
+
+.task-phase-progress-bar {
+  flex: 1;
+  height: 6px;
+  overflow: hidden;
+  border-radius: var(--radius-full);
+  background-color: var(--color-bg-tertiary);
+}
+
+.task-phase-progress-fill {
+  height: 100%;
+  border-radius: inherit;
+  background-color: var(--color-primary);
 }
 
 .task-footer {

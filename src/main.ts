@@ -9,9 +9,9 @@ import './style.css'
 const app = createApp(App)
 
 app.use(pinia)
-app.use(router)
 
 // Initialize stores with mock data
 storesManager.init()
 
+app.use(router)
 app.mount('#app')

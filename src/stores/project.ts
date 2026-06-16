@@ -2,8 +2,9 @@
 
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import type { Project } from '@/types'
+import type { Project, ProjectPhaseTemplate } from '@/types'
 import mockApi from '@/utils/mock'
+import { createDefaultPhaseTemplates, normalizePhaseTemplates } from '@/utils/taskPhases'
 
 export const useProjectStore = defineStore('project', () => {
   const projects = ref<Project[]>([])
@@ -42,7 +43,10 @@ export const useProjectStore = defineStore('project', () => {
   }
 
   function createProject(data: Omit<Project, 'id' | 'createdAt'>) {
-    const project = mockApi.createProject(data)
+    const project = mockApi.createProject({
+      ...data,
+      phaseTemplates: normalizePhaseTemplates(data.phaseTemplates || createDefaultPhaseTemplates())
+    })
     projects.value.push(project)
     return project
   }
@@ -56,6 +60,57 @@ export const useProjectStore = defineStore('project', () => {
       }
     }
     return updated
+  }
+
+  function getEnabledPhaseTemplates(projectId: string): ProjectPhaseTemplate[] {
+    const project = projects.value.find(p => p.id === projectId)
+    return normalizePhaseTemplates(project?.phaseTemplates)
+      .filter(template => template.enabled)
+  }
+
+  function addPhaseTemplate(projectId: string, name: string) {
+    const project = projects.value.find(p => p.id === projectId)
+    const trimmedName = name.trim()
+    if (!project || !trimmedName) return null
+    const templates = normalizePhaseTemplates(project.phaseTemplates)
+    const template: ProjectPhaseTemplate = {
+      id: `custom-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`,
+      name: trimmedName,
+      order: templates.length,
+      enabled: true
+    }
+    updateProject(projectId, { phaseTemplates: [...templates, template] })
+    return template
+  }
+
+  function updatePhaseTemplate(projectId: string, templateId: string, data: Partial<ProjectPhaseTemplate>) {
+    const project = projects.value.find(p => p.id === projectId)
+    if (!project) return null
+    const templates = normalizePhaseTemplates(project.phaseTemplates).map(template =>
+      template.id === templateId
+        ? {
+            ...template,
+            ...data,
+            name: data.name !== undefined ? data.name.trim() || template.name : template.name
+          }
+        : template
+    )
+    return updateProject(projectId, { phaseTemplates: normalizePhaseTemplates(templates) })
+  }
+
+  function movePhaseTemplate(projectId: string, templateId: string, direction: 'up' | 'down') {
+    const project = projects.value.find(p => p.id === projectId)
+    if (!project) return null
+    const templates = normalizePhaseTemplates(project.phaseTemplates)
+    const index = templates.findIndex(template => template.id === templateId)
+    const targetIndex = direction === 'up' ? index - 1 : index + 1
+    if (index < 0 || targetIndex < 0 || targetIndex >= templates.length) return project
+    const next = [...templates]
+    const [template] = next.splice(index, 1)
+    next.splice(targetIndex, 0, template)
+    return updateProject(projectId, {
+      phaseTemplates: next.map((item, order) => ({ ...item, order }))
+    })
   }
 
   function deleteProject(id: string) {
@@ -100,6 +155,10 @@ export const useProjectStore = defineStore('project', () => {
     clearSelectedPlanning,
     createProject,
     updateProject,
-    deleteProject
+    deleteProject,
+    getEnabledPhaseTemplates,
+    addPhaseTemplate,
+    updatePhaseTemplate,
+    movePhaseTemplate
   }
 })

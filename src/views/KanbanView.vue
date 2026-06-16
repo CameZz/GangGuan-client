@@ -13,7 +13,21 @@ interface TaskFilters {
   stage?: TaskStage
   priority?: TaskPriority
   assigneeId?: string | null
+  myParticipationOnly?: boolean
 }
+
+interface KanbanRequirementEntry {
+  kind: 'requirement'
+  requirement: Task
+  childTasks: Task[]
+}
+
+interface KanbanTaskEntry {
+  kind: 'task'
+  task: Task
+}
+
+type KanbanEntry = KanbanRequirementEntry | KanbanTaskEntry
 
 const route = useRoute()
 const taskStore = useTaskStore()
@@ -23,7 +37,8 @@ const userStore = useUserStore()
 const filters = ref<TaskFilters>({
   stage: undefined,
   priority: undefined,
-  assigneeId: undefined
+  assigneeId: undefined,
+  myParticipationOnly: false
 })
 
 const selectedPlanningId = computed(() => projectStore.selectedPlanningId)
@@ -31,6 +46,8 @@ const selectedPlanningId = computed(() => projectStore.selectedPlanningId)
 const isModalOpen = ref(false)
 const selectedTask = ref<Task | null>(null)
 const showAbandoned = ref(false)
+const childParentRequirementId = ref<string | null>(null)
+const collapsedRequirementIds = ref<Set<string>>(new Set())
 
 // Sync projectId from route (only when it changes)
 watchEffect(() => {
@@ -49,16 +66,111 @@ watchEffect(() => {
 })
 
 const columns = computed(() => {
-  const cols = [
-    { id: 'todo', title: '待办', tasks: filteredTasks.value.filter(t => t.status === 'todo') },
-    { id: 'in-progress', title: '进行中', tasks: filteredTasks.value.filter(t => t.status === 'in-progress') },
-    { id: 'done', title: '已完成', tasks: filteredTasks.value.filter(t => t.status === 'done') }
-  ]
+  const cols = ([
+    { id: 'todo', title: '待办' },
+    { id: 'in-progress', title: '进行中' },
+    { id: 'done', title: '已完成' }
+  ] as Array<{ id: TaskStatus, title: string }>).map(column => {
+    const tasks = filteredTasks.value.filter(t => t.status === column.id)
+    return {
+      ...column,
+      tasks,
+      entries: buildKanbanEntries(tasks),
+      count: tasks.length
+    }
+  })
   if (showAbandoned.value) {
-    cols.push({ id: 'abandoned', title: '已废弃', tasks: filteredTasks.value.filter(t => t.status === 'abandoned') })
+    const tasks = filteredTasks.value.filter(t => t.status === 'abandoned')
+    cols.push({
+      id: 'abandoned',
+      title: '已废弃',
+      tasks,
+      entries: buildKanbanEntries(tasks),
+      count: tasks.length
+    })
   }
   return cols
 })
+
+const visibleRequirementIds = computed(() => {
+  const ids = new Set<string>()
+  columns.value.forEach(column => {
+    column.entries.forEach(entry => {
+      if (entry.kind === 'requirement') {
+        ids.add(entry.requirement.id)
+      }
+    })
+  })
+  return Array.from(ids)
+})
+
+function buildKanbanEntries(tasks: Task[]): KanbanEntry[] {
+  const groups = new Map<string, KanbanRequirementEntry>()
+  const orderedRequirementIds: string[] = []
+  const standaloneTasks: Task[] = []
+
+  function ensureGroup(requirement: Task): KanbanRequirementEntry {
+    let group = groups.get(requirement.id)
+    if (!group) {
+      group = {
+        kind: 'requirement',
+        requirement,
+        childTasks: getVisibleRequirementChildTasks(requirement.id)
+      }
+      groups.set(requirement.id, group)
+      orderedRequirementIds.push(requirement.id)
+    }
+    return group
+  }
+
+  for (const task of tasks) {
+    if (taskStore.isRequirement(task)) {
+      ensureGroup(task)
+      continue
+    }
+
+    if (task.parentRequirementId) {
+      const requirement = taskStore.tasks.find(t => t.id === task.parentRequirementId)
+      if (requirement && taskStore.isRequirement(requirement)) {
+        ensureGroup(requirement)
+        continue
+      }
+    }
+
+    standaloneTasks.push(task)
+  }
+
+  return [
+    ...orderedRequirementIds.map(id => groups.get(id)!).filter(Boolean),
+    ...standaloneTasks.map(task => ({ kind: 'task' as const, task }))
+  ]
+}
+
+function getScopedVisibleTasks(): Task[] {
+  const projectId = projectStore.currentProjectId
+  const planningId = selectedPlanningId.value
+  let tasks = taskStore.tasks
+
+  if (projectId) {
+    tasks = tasks.filter(t => t.projectId === projectId)
+  }
+
+  if (planningId) {
+    tasks = tasks.filter(t => t.planningId === planningId)
+  }
+
+  if (!showAbandoned.value) {
+    tasks = tasks.filter(t => t.status !== 'abandoned')
+  }
+
+  return tasks
+}
+
+function getVisibleRequirementChildTasks(requirementId: string): Task[] {
+  return getScopedVisibleTasks().filter(task =>
+    taskStore.isTaskItem(task) && task.parentRequirementId === requirementId
+  )
+}
 
 const abandonedCount = computed(() => {
   const projectId = projectStore.currentProjectId
@@ -73,11 +185,21 @@ const abandonedCount = computed(() => {
   return tasks.length
 })
 
+function isTaskFilterActive() {
+  return !!filters.value.stage ||
+    filters.value.assigneeId !== undefined && filters.value.assigneeId !== null ||
+    !!filters.value.myParticipationOnly
+}
+
 const filteredTasks = computed(() => {
   const projectId = projectStore.currentProjectId
   const planningId = selectedPlanningId.value
   const stage = filters.value.stage
   const status = filters.value.status
+  const priority = filters.value.priority
+  const assigneeId = filters.value.assigneeId
+  const myParticipationOnly = filters.value.myParticipationOnly
+  const currentUserId = userStore.currentUser?.id
 
   // 先按项目过滤
   let tasks = taskStore.tasks
@@ -97,7 +219,28 @@ const filteredTasks = computed(() => {
 
   // 按阶段过滤
   if (stage) {
-    tasks = tasks.filter(t => t.stage === stage)
+    tasks = tasks.filter(t => taskStore.isTaskItem(t) && taskStore.getTaskStageValue(t) === stage)
+  }
+
+  // 按优先级过滤
+  if (priority) {
+    tasks = tasks.filter(t => t.priority === priority)
+  }
+
+  // 按负责人过滤
+  if (assigneeId !== undefined && assigneeId !== null) {
+    tasks = tasks.filter(t => taskStore.isTaskItem(t) && t.assigneeId === assigneeId)
+  }
+
+  // 只显示自己参与的任务
+  if (myParticipationOnly) {
+    tasks = currentUserId
+      ? tasks.filter(t => taskStore.isTaskItem(t) && taskStore.isUserParticipating(t, currentUserId))
+      : []
+  }
+
+  if (isTaskFilterActive()) {
+    tasks = tasks.filter(t => taskStore.isTaskItem(t))
   }
 
   // 默认隐藏废弃任务
@@ -112,19 +255,52 @@ function handleFilter(newFilters: TaskFilters) {
   filters.value = { ...filters.value, ...newFilters }
 }
 
+function isRequirementCollapsed(requirementId: string): boolean {
+  return collapsedRequirementIds.value.has(requirementId)
+}
+
+function toggleRequirementCollapsed(requirementId: string) {
+  const next = new Set(collapsedRequirementIds.value)
+  if (next.has(requirementId)) {
+    next.delete(requirementId)
+  } else {
+    next.add(requirementId)
+  }
+  collapsedRequirementIds.value = next
+}
+
+function expandAllRequirements() {
+  const next = new Set(collapsedRequirementIds.value)
+  visibleRequirementIds.value.forEach(id => next.delete(id))
+  collapsedRequirementIds.value = next
+}
+
+function collapseAllRequirements() {
+  collapsedRequirementIds.value = new Set(visibleRequirementIds.value)
+}
+
 function openNewTaskModal() {
   selectedTask.value = null
+  childParentRequirementId.value = null
   isModalOpen.value = true
 }
 
 function openEditTaskModal(task: Task) {
   selectedTask.value = task
+  childParentRequirementId.value = null
   isModalOpen.value = true
 }
 
 function closeModal() {
   isModalOpen.value = false
   selectedTask.value = null
+  childParentRequirementId.value = null
+}
+
+function openChildTaskModal(requirementId: string) {
+  selectedTask.value = null
+  childParentRequirementId.value = requirementId
+  isModalOpen.value = true
 }
 
 function handleSave(taskData: Partial<Task>) {
@@ -134,12 +310,16 @@ function handleSave(taskData: Partial<Task>) {
     taskStore.createTask({
       title: taskData.title || '',
       description: taskData.description || '',
+      itemType: taskData.itemType || 'task',
+      parentRequirementId: taskData.parentRequirementId || null,
       status: taskData.status || 'todo',
       priority: taskData.priority || 'medium',
       dueDate: taskData.dueDate || null,
       projectId: taskData.projectId || projectStore.currentProjectId || '',
       assigneeId: taskData.assigneeId || null,
       stage: taskData.stage || 'filed',
+      phases: taskData.phases || [],
+      currentPhaseId: taskData.currentPhaseId || null,
       planningId: taskData.planningId || null,
       participants: taskData.participants || [],
       references: taskData.references || [],
@@ -150,8 +330,9 @@ function handleSave(taskData: Partial<Task>) {
 }
 
 function handleDelete(taskId: string) {
-  taskStore.deleteTask(taskId)
-  closeModal()
+  if (taskStore.deleteTask(taskId)) {
+    closeModal()
+  }
 }
 
 function handleDragOver(e: DragEvent) {
@@ -165,6 +346,11 @@ function handleDrop(e: DragEvent, status: TaskStatus) {
     taskStore.moveTask(taskId, status, userStore.currentUser?.id)
   }
 }
+
+function getRequirementProgressText(requirement: Task): string {
+  const progress = taskStore.getRequirementProgress(requirement.id)
+  return progress.total === 0 ? '待拆分' : `${progress.done}/${progress.total}`
+}
 </script>
 
 <template>
@@ -176,6 +362,14 @@ function handleDrop(e: DragEvent, status: TaskStatus) {
         <input type="checkbox" v-model="showAbandoned" :disabled="abandonedCount === 0" />
         <span>显示废弃任务({{ abandonedCount }})</span>
       </label>
+      <div class="requirement-toolbar">
+        <button class="btn btn-secondary btn-sm" :disabled="visibleRequirementIds.length === 0" @click="expandAllRequirements">
+          展开全部
+        </button>
+        <button class="btn btn-secondary btn-sm" :disabled="visibleRequirementIds.length === 0" @click="collapseAllRequirements">
+          折叠全部
+        </button>
+      </div>
       <button class="btn btn-primary" @click="openNewTaskModal">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <path d="M12 5v14M5 12h14" />
@@ -196,15 +390,61 @@ function handleDrop(e: DragEvent, status: TaskStatus) {
       >
         <div class="column-header">
           <h3 class="column-title">{{ column.title }}</h3>
-          <span class="column-count">{{ column.tasks.length }}</span>
+          <span class="column-count">{{ column.count }}</span>
         </div>
         <div class="column-content">
-          <TaskCard
-            v-for="task in column.tasks"
-            :key="task.id"
-            :task="task"
-            @click="openEditTaskModal(task)"
-          />
+          <template v-for="entry in column.entries" :key="entry.kind === 'requirement' ? `req-${entry.requirement.id}` : `task-${entry.task.id}`">
+            <div
+              v-if="entry.kind === 'requirement'"
+              class="requirement-group"
+            >
+              <div class="requirement-group-header" @click="openEditTaskModal(entry.requirement)">
+                <div>
+                  <div class="requirement-group-title">{{ entry.requirement.title }}</div>
+                  <div class="requirement-group-meta">
+                    <span>需求单</span>
+                    <span>{{ getRequirementProgressText(entry.requirement) }}</span>
+                    <span>{{ entry.childTasks.length }} 个任务</span>
+                  </div>
+                </div>
+                <div class="requirement-actions">
+                  <button
+                    class="btn btn-ghost btn-sm"
+                    :aria-expanded="!isRequirementCollapsed(entry.requirement.id)"
+                    @click.stop="toggleRequirementCollapsed(entry.requirement.id)"
+                  >
+                    {{ isRequirementCollapsed(entry.requirement.id) ? '展开' : '折叠' }}
+                  </button>
+                  <button class="btn btn-ghost btn-sm" @click.stop="openChildTaskModal(entry.requirement.id)">
+                    新增任务
+                  </button>
+                </div>
+              </div>
+              <div
+                v-if="entry.childTasks.length > 0 && !isRequirementCollapsed(entry.requirement.id)"
+                class="requirement-child-list"
+              >
+                <TaskCard
+                  v-for="childTask in entry.childTasks"
+                  :key="childTask.id"
+                  :task="childTask"
+                  @click="openEditTaskModal(childTask)"
+                />
+              </div>
+              <div
+                v-else-if="entry.childTasks.length > 0"
+                class="requirement-collapsed"
+              >
+                已折叠 {{ entry.childTasks.length }} 个任务
+              </div>
+              <div v-else class="requirement-empty">待拆分</div>
+            </div>
+            <TaskCard
+              v-else
+              :task="entry.task"
+              @click="openEditTaskModal(entry.task)"
+            />
+          </template>
         </div>
       </div>
     </div>
@@ -220,9 +460,12 @@ function handleDrop(e: DragEvent, status: TaskStatus) {
     <TaskModal
       :is-open="isModalOpen"
       :task="selectedTask"
+      :project-id="projectStore.currentProjectId || ''"
+      :initial-parent-requirement-id="childParentRequirementId"
       @close="closeModal"
       @save="handleSave"
       @delete="handleDelete"
+      @create-child="openChildTaskModal"
     />
   </div>
 </template>
@@ -271,6 +514,13 @@ function handleDrop(e: DragEvent, status: TaskStatus) {
 
 .abandoned-toggle input[type="checkbox"]:disabled + span {
   opacity: 0.5;
+}
+
+.requirement-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-right: 16px;
 }
 
 .page-subtitle {
@@ -333,5 +583,89 @@ function handleDrop(e: DragEvent, status: TaskStatus) {
   flex-direction: column;
   gap: 8px;
   overflow-y: auto;
+}
+
+.requirement-group {
+  padding: 10px;
+  border: 1px solid #94a3b8;
+  border-radius: var(--radius-md);
+  background-color: #f8fafc;
+  box-shadow: inset 0 0 0 1px rgba(148, 163, 184, 0.18);
+}
+
+.requirement-group-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 8px;
+  margin-bottom: 8px;
+  cursor: pointer;
+}
+
+.requirement-group-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  line-height: 1.4;
+}
+
+.requirement-group-meta {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--color-text-secondary);
+}
+
+.requirement-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: flex-end;
+}
+
+.requirement-child-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-left: 10px;
+  border-left: 2px solid #cbd5e1;
+}
+
+.requirement-collapsed {
+  padding: 10px;
+  border: 1px dashed #cbd5e1;
+  border-radius: var(--radius-sm);
+  color: var(--color-text-secondary);
+  font-size: 13px;
+  text-align: center;
+  background-color: var(--color-bg-primary);
+}
+
+.requirement-empty {
+  padding: 12px;
+  border: 1px dashed #cbd5e1;
+  border-radius: var(--radius-sm);
+  color: var(--color-text-muted);
+  font-size: 13px;
+  text-align: center;
+  background-color: var(--color-bg-primary);
+}
+
+.btn-sm {
+  padding: 4px 8px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+@media (max-width: 980px) {
+  .page-header {
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+
+  .requirement-toolbar {
+    margin-right: 0;
+  }
 }
 </style>

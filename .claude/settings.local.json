@@ -26,7 +26,17 @@
       "Bash(git fsck *)",
       "mcp__codegraph__codegraph_node",
       "Bash(python *)",
-      "Bash(grep -v \"^--$\")"
+      "Bash(grep -v \"^--$\")",
+      "Bash(openspec help *)",
+      "Bash(openspec show *)",
+      "Bash(claude --version)",
+      "Bash(mkdir -p ~/.claude/commands)",
+      "Bash(cp -r .claude/commands/opsx ~/.claude/commands/)",
+      "Bash(xxd)",
+      "Bash(openspec *)",
+      "Bash(echo '--- *)",
+      "Bash(ipconfig)",
+      "Bash(findstr \"IPv4\")"
     ]
   }
 }

@@ -2,7 +2,6 @@
 import { ref, computed, watchEffect } from 'vue'
 import { useRoute } from 'vue-router'
 import type { Task, TaskStatus, TaskStage, TaskPriority } from '@/types'
-import { TASK_STAGES } from '@/types'
 import { useTaskStore, useProjectStore, useMemberStore, useUserStore } from '@/stores'
 import TaskModal from '@/components/task/TaskModal.vue'
 import TaskFilter from '@/components/task/TaskFilter.vue'
@@ -14,7 +13,21 @@ interface TaskFilters {
   stage?: TaskStage
   priority?: TaskPriority
   assigneeId?: string | null
+  myParticipationOnly?: boolean
 }
+
+interface ListRequirementEntry {
+  kind: 'requirement'
+  requirement: Task
+  childTasks: Task[]
+}
+
+interface ListTaskEntry {
+  kind: 'task'
+  task: Task
+}
+
+type ListEntry = ListRequirementEntry | ListTaskEntry
 
 const route = useRoute()
 const taskStore = useTaskStore()
@@ -25,7 +38,8 @@ const userStore = useUserStore()
 const filters = ref<TaskFilters>({
   stage: undefined,
   priority: undefined,
-  assigneeId: undefined
+  assigneeId: undefined,
+  myParticipationOnly: false
 })
 
 const selectedPlanningId = computed(() => projectStore.selectedPlanningId)
@@ -33,6 +47,8 @@ const selectedPlanningId = computed(() => projectStore.selectedPlanningId)
 const isModalOpen = ref(false)
 const selectedTask = ref<Task | null>(null)
 const showAbandoned = ref(false)
+const childParentRequirementId = ref<string | null>(null)
+const collapsedRequirementIds = ref<Set<string>>(new Set())
 
 // 排序状态
 type SortField = 'title' | 'status' | 'stage' | 'priority' | 'assignee' | 'dueDate' | null
@@ -121,11 +137,21 @@ const abandonedCount = computed(() => {
   return tasks.length
 })
 
+function isTaskFilterActive() {
+  return !!filters.value.stage ||
+    filters.value.assigneeId !== undefined && filters.value.assigneeId !== null ||
+    !!filters.value.myParticipationOnly
+}
+
 const filteredTasks = computed(() => {
   const projectId = projectStore.currentProjectId
   const planningId = selectedPlanningId.value
   const stage = filters.value.stage
   const status = filters.value.status
+  const priority = filters.value.priority
+  const assigneeId = filters.value.assigneeId
+  const myParticipationOnly = filters.value.myParticipationOnly
+  const currentUserId = userStore.currentUser?.id
 
   // 先按项目过滤
   let tasks = taskStore.tasks
@@ -145,7 +171,28 @@ const filteredTasks = computed(() => {
 
   // 按阶段过滤
   if (stage) {
-    tasks = tasks.filter(t => t.stage === stage)
+    tasks = tasks.filter(t => taskStore.isTaskItem(t) && taskStore.getTaskStageValue(t) === stage)
+  }
+
+  // 按优先级过滤
+  if (priority) {
+    tasks = tasks.filter(t => t.priority === priority)
+  }
+
+  // 按负责人过滤
+  if (assigneeId !== undefined && assigneeId !== null) {
+    tasks = tasks.filter(t => taskStore.isTaskItem(t) && t.assigneeId === assigneeId)
+  }
+
+  // 只显示自己参与的任务
+  if (myParticipationOnly) {
+    tasks = currentUserId
+      ? tasks.filter(t => taskStore.isTaskItem(t) && taskStore.isUserParticipating(t, currentUserId))
+      : []
+  }
+
+  if (isTaskFilterActive()) {
+    tasks = tasks.filter(t => taskStore.isTaskItem(t))
   }
 
   // 默认隐藏废弃任务
@@ -163,7 +210,7 @@ const filteredTasks = computed(() => {
         case 'status':
           return ((statusOrder[a.status] ?? 0) - (statusOrder[b.status] ?? 0)) * dir
         case 'stage':
-          return ((stageOrder[a.stage] ?? 0) - (stageOrder[b.stage] ?? 0)) * dir
+          return ((stageOrder[taskStore.getTaskStageValue(a)] ?? 0) - (stageOrder[taskStore.getTaskStageValue(b)] ?? 0)) * dir
         case 'priority':
           return ((priorityOrder[a.priority] ?? 0) - (priorityOrder[b.priority] ?? 0)) * dir
         case 'assignee': {
@@ -185,23 +232,132 @@ const filteredTasks = computed(() => {
   return tasks
 })
 
+const listEntries = computed<ListEntry[]>(() => buildListEntries(filteredTasks.value))
+
+const visibleRequirementIds = computed(() => {
+  return listEntries.value
+    .filter((entry): entry is ListRequirementEntry => entry.kind === 'requirement')
+    .map(entry => entry.requirement.id)
+})
+
+function buildListEntries(tasks: Task[]): ListEntry[] {
+  const groups = new Map<string, ListRequirementEntry>()
+  const orderedRequirementIds: string[] = []
+  const standaloneTasks: Task[] = []
+
+  function ensureGroup(requirement: Task): ListRequirementEntry {
+    let group = groups.get(requirement.id)
+    if (!group) {
+      group = {
+        kind: 'requirement',
+        requirement,
+        childTasks: getVisibleRequirementChildTasks(requirement.id)
+      }
+      groups.set(requirement.id, group)
+      orderedRequirementIds.push(requirement.id)
+    }
+    return group
+  }
+
+  for (const task of tasks) {
+    if (taskStore.isRequirement(task)) {
+      ensureGroup(task)
+      continue
+    }
+
+    if (task.parentRequirementId) {
+      const requirement = taskStore.tasks.find(t => t.id === task.parentRequirementId)
+      if (requirement && taskStore.isRequirement(requirement)) {
+        ensureGroup(requirement)
+        continue
+      }
+    }
+
+    standaloneTasks.push(task)
+  }
+
+  return [
+    ...orderedRequirementIds.map(id => groups.get(id)!).filter(Boolean),
+    ...standaloneTasks.map(task => ({ kind: 'task' as const, task }))
+  ]
+}
+
+function getScopedVisibleTasks(): Task[] {
+  const projectId = projectStore.currentProjectId
+  const planningId = selectedPlanningId.value
+  let tasks = taskStore.tasks
+
+  if (projectId) {
+    tasks = tasks.filter(t => t.projectId === projectId)
+  }
+
+  if (planningId) {
+    tasks = tasks.filter(t => t.planningId === planningId)
+  }
+
+  if (!showAbandoned.value) {
+    tasks = tasks.filter(t => t.status !== 'abandoned')
+  }
+
+  return tasks
+}
+
+function getVisibleRequirementChildTasks(requirementId: string): Task[] {
+  return getScopedVisibleTasks().filter(task =>
+    taskStore.isTaskItem(task) && task.parentRequirementId === requirementId
+  )
+}
+
 function handleFilter(newFilters: TaskFilters) {
   filters.value = { ...filters.value, ...newFilters }
 }
 
+function isRequirementCollapsed(requirementId: string): boolean {
+  return collapsedRequirementIds.value.has(requirementId)
+}
+
+function toggleRequirementCollapsed(requirementId: string) {
+  const next = new Set(collapsedRequirementIds.value)
+  if (next.has(requirementId)) {
+    next.delete(requirementId)
+  } else {
+    next.add(requirementId)
+  }
+  collapsedRequirementIds.value = next
+}
+
+function expandAllRequirements() {
+  const next = new Set(collapsedRequirementIds.value)
+  visibleRequirementIds.value.forEach(id => next.delete(id))
+  collapsedRequirementIds.value = next
+}
+
+function collapseAllRequirements() {
+  collapsedRequirementIds.value = new Set(visibleRequirementIds.value)
+}
+
 function openNewTaskModal() {
   selectedTask.value = null
+  childParentRequirementId.value = null
   isModalOpen.value = true
 }
 
 function openEditTaskModal(task: Task) {
   selectedTask.value = task
+  childParentRequirementId.value = null
   isModalOpen.value = true
 }
 
 function closeModal() {
   isModalOpen.value = false
   selectedTask.value = null
+  childParentRequirementId.value = null
+}
+
+function openChildTaskModal(requirementId: string) {
+  selectedTask.value = null
+  childParentRequirementId.value = requirementId
+  isModalOpen.value = true
 }
 
 function handleSave(taskData: Partial<Task>) {
@@ -211,12 +367,16 @@ function handleSave(taskData: Partial<Task>) {
     taskStore.createTask({
       title: taskData.title || '',
       description: taskData.description || '',
+      itemType: taskData.itemType || 'task',
+      parentRequirementId: taskData.parentRequirementId || null,
       status: taskData.status || 'todo',
       priority: taskData.priority || 'medium',
       dueDate: taskData.dueDate || null,
       projectId: taskData.projectId || projectStore.currentProjectId || '',
       assigneeId: taskData.assigneeId || null,
       stage: taskData.stage || 'filed',
+      phases: taskData.phases || [],
+      currentPhaseId: taskData.currentPhaseId || null,
       planningId: taskData.planningId || null,
       participants: taskData.participants || [],
       references: taskData.references || [],
@@ -227,8 +387,9 @@ function handleSave(taskData: Partial<Task>) {
 }
 
 function handleDelete(taskId: string) {
-  taskStore.deleteTask(taskId)
-  closeModal()
+  if (taskStore.deleteTask(taskId)) {
+    closeModal()
+  }
 }
 
 function getMember(memberId: string | null) {
@@ -250,9 +411,22 @@ function getStatusLabel(status: string): string {
   return labels[status] || status
 }
 
-function getStageLabel(stage: string): string {
-  const s = TASK_STAGES.find(t => t.value === stage)
-  return s?.label || stage
+function getTaskStageLabel(task: Task): string {
+  return taskStore.getTaskStageLabel(task)
+}
+
+function getParentRequirement(task: Task): Task | null {
+  if (!task.parentRequirementId) return null
+  return taskStore.tasks.find(t => t.id === task.parentRequirementId) || null
+}
+
+function getItemTypeLabel(task: Task): string {
+  return taskStore.isRequirement(task) ? '需求单' : '任务单'
+}
+
+function getRequirementProgressText(task: Task): string {
+  const progress = taskStore.getRequirementProgress(task.id)
+  return progress.total === 0 ? '待拆分' : `${progress.done}/${progress.total}`
 }
 </script>
 
@@ -265,6 +439,14 @@ function getStageLabel(stage: string): string {
         <input type="checkbox" v-model="showAbandoned" :disabled="abandonedCount === 0" />
         <span>显示废弃任务({{ abandonedCount }})</span>
       </label>
+      <div class="requirement-toolbar">
+        <button class="btn btn-secondary btn-sm" :disabled="visibleRequirementIds.length === 0" @click="expandAllRequirements">
+          展开全部
+        </button>
+        <button class="btn btn-secondary btn-sm" :disabled="visibleRequirementIds.length === 0" @click="collapseAllRequirements">
+          折叠全部
+        </button>
+      </div>
       <button class="btn btn-primary" @click="openNewTaskModal">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <path d="M12 5v14M5 12h14" />
@@ -275,7 +457,7 @@ function getStageLabel(stage: string): string {
 
     <TaskFilter @filter="handleFilter" />
 
-    <div v-if="filteredTasks.length > 0" class="task-table">
+    <div v-if="listEntries.length > 0" class="task-table">
       <div class="table-header">
         <div class="col col-title sortable" @click="toggleSort('title')">标题{{ getSortIcon('title') }}</div>
         <div class="col col-status sortable" @click="toggleSort('status')">状态{{ getSortIcon('status') }}</div>
@@ -285,34 +467,120 @@ function getStageLabel(stage: string): string {
         <div class="col col-due sortable" @click="toggleSort('dueDate')">截止日期{{ getSortIcon('dueDate') }}</div>
       </div>
       <div class="table-body">
-        <div
-          v-for="task in filteredTasks"
-          :key="task.id"
-          class="table-row"
-          @click="openEditTaskModal(task)"
-        >
-          <div class="col col-title">
-            <span class="task-title">{{ task.title }}</span>
-            <span v-if="task.description" class="task-desc">{{ task.description }}</span>
+        <template v-for="entry in listEntries" :key="entry.kind === 'requirement' ? `req-${entry.requirement.id}` : `task-${entry.task.id}`">
+          <div v-if="entry.kind === 'requirement'" class="requirement-list-group">
+            <div class="table-row requirement-row" @click="openEditTaskModal(entry.requirement)">
+              <div class="col col-title">
+                <div class="task-title-line">
+                  <span class="task-title">{{ entry.requirement.title }}</span>
+                  <span class="item-type requirement">需求单</span>
+                  <button
+                    class="btn btn-ghost btn-sm requirement-toggle"
+                    :aria-expanded="!isRequirementCollapsed(entry.requirement.id)"
+                    @click.stop="toggleRequirementCollapsed(entry.requirement.id)"
+                  >
+                    {{ isRequirementCollapsed(entry.requirement.id) ? '展开' : '折叠' }}
+                  </button>
+                </div>
+                <span v-if="entry.requirement.description" class="task-desc">{{ entry.requirement.description }}</span>
+                <span class="task-desc">拆分进度：{{ getRequirementProgressText(entry.requirement) }} · {{ entry.childTasks.length }} 个任务</span>
+              </div>
+              <div class="col col-status">
+                <span class="badge" :class="`badge-${entry.requirement.status}`">
+                  {{ getStatusLabel(entry.requirement.status) }}
+                </span>
+              </div>
+              <div class="col col-stage">
+                <span class="stage-badge">需求</span>
+              </div>
+              <div class="col col-priority">
+                <span class="badge" :class="`badge-${entry.requirement.priority}`">
+                  {{ entry.requirement.priority === 'low' ? '低' : entry.requirement.priority === 'medium' ? '中' : '高' }}
+                </span>
+              </div>
+              <div class="col col-assignee">
+                <span class="muted">-</span>
+              </div>
+              <div class="col col-due">-</div>
+            </div>
+            <div
+              v-if="entry.childTasks.length > 0 && !isRequirementCollapsed(entry.requirement.id)"
+              class="requirement-child-rows"
+            >
+              <div
+                v-for="childTask in entry.childTasks"
+                :key="childTask.id"
+                class="table-row child-row"
+                @click="openEditTaskModal(childTask)"
+              >
+                <div class="col col-title">
+                  <div class="task-title-line">
+                    <span class="task-title">{{ childTask.title }}</span>
+                    <span class="item-type">任务单</span>
+                  </div>
+                  <span v-if="childTask.description" class="task-desc">{{ childTask.description }}</span>
+                </div>
+                <div class="col col-status">
+                  <span class="badge" :class="`badge-${childTask.status}`">
+                    {{ getStatusLabel(childTask.status) }}
+                  </span>
+                </div>
+                <div class="col col-stage">
+                  <span class="stage-badge">{{ getTaskStageLabel(childTask) }}</span>
+                </div>
+                <div class="col col-priority">
+                  <span class="badge" :class="`badge-${childTask.priority}`">
+                    {{ childTask.priority === 'low' ? '低' : childTask.priority === 'medium' ? '中' : '高' }}
+                  </span>
+                </div>
+                <div class="col col-assignee">
+                  <MemberAvatar :member="getMember(childTask.assigneeId)" size="sm" show-name />
+                </div>
+                <div class="col col-due">{{ formatDate(childTask.dueDate) }}</div>
+              </div>
+            </div>
+            <div
+              v-else-if="entry.childTasks.length > 0"
+              class="requirement-collapsed-row"
+            >
+              已折叠 {{ entry.childTasks.length }} 个任务
+            </div>
+            <div v-else class="requirement-empty-row">待拆分</div>
           </div>
-          <div class="col col-status">
-            <span class="badge" :class="`badge-${task.status}`">
-              {{ getStatusLabel(task.status) }}
-            </span>
+          <div
+            v-else
+            class="table-row"
+            @click="openEditTaskModal(entry.task)"
+          >
+            <div class="col col-title">
+              <div class="task-title-line">
+                <span class="task-title">{{ entry.task.title }}</span>
+                <span class="item-type">
+                  {{ getItemTypeLabel(entry.task) }}
+                </span>
+              </div>
+              <span v-if="entry.task.description" class="task-desc">{{ entry.task.description }}</span>
+              <span v-if="getParentRequirement(entry.task)" class="task-desc">所属需求：{{ getParentRequirement(entry.task)?.title }}</span>
+            </div>
+            <div class="col col-status">
+              <span class="badge" :class="`badge-${entry.task.status}`">
+                {{ getStatusLabel(entry.task.status) }}
+              </span>
+            </div>
+            <div class="col col-stage">
+              <span class="stage-badge">{{ getTaskStageLabel(entry.task) }}</span>
+            </div>
+            <div class="col col-priority">
+              <span class="badge" :class="`badge-${entry.task.priority}`">
+                {{ entry.task.priority === 'low' ? '低' : entry.task.priority === 'medium' ? '中' : '高' }}
+              </span>
+            </div>
+            <div class="col col-assignee">
+              <MemberAvatar :member="getMember(entry.task.assigneeId)" size="sm" show-name />
+            </div>
+            <div class="col col-due">{{ formatDate(entry.task.dueDate) }}</div>
           </div>
-          <div class="col col-stage">
-            <span class="stage-badge">{{ getStageLabel(task.stage) }}</span>
-          </div>
-          <div class="col col-priority">
-            <span class="badge" :class="`badge-${task.priority}`">
-              {{ task.priority === 'low' ? '低' : task.priority === 'medium' ? '中' : '高' }}
-            </span>
-          </div>
-          <div class="col col-assignee">
-            <MemberAvatar :member="getMember(task.assigneeId)" size="sm" show-name />
-          </div>
-          <div class="col col-due">{{ formatDate(task.dueDate) }}</div>
-        </div>
+        </template>
       </div>
     </div>
 
@@ -327,9 +595,12 @@ function getStageLabel(stage: string): string {
     <TaskModal
       :is-open="isModalOpen"
       :task="selectedTask"
+      :project-id="projectStore.currentProjectId || ''"
+      :initial-parent-requirement-id="childParentRequirementId"
       @close="closeModal"
       @save="handleSave"
       @delete="handleDelete"
+      @create-child="openChildTaskModal"
     />
   </div>
 </template>
@@ -376,6 +647,13 @@ function getStageLabel(stage: string): string {
 
 .abandoned-toggle input[type="checkbox"]:disabled + span {
   opacity: 0.5;
+}
+
+.requirement-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-right: 16px;
 }
 
 .page-subtitle {
@@ -434,6 +712,57 @@ function getStageLabel(stage: string): string {
   background-color: var(--color-bg-secondary);
 }
 
+.requirement-list-group {
+  margin: 8px;
+  border: 1px solid #94a3b8;
+  border-radius: var(--radius-md);
+  background-color: #f8fafc;
+  overflow: hidden;
+}
+
+.requirement-list-group + .requirement-list-group,
+.requirement-list-group + .table-row,
+.table-row + .requirement-list-group {
+  margin-top: 8px;
+}
+
+.requirement-row {
+  background-color: #f8fafc;
+  border-bottom: 1px solid #cbd5e1;
+}
+
+.requirement-child-rows {
+  padding-left: 20px;
+  border-left: 2px solid #cbd5e1;
+  margin-left: 16px;
+}
+
+.child-row {
+  background-color: var(--color-bg-primary);
+}
+
+.requirement-empty-row {
+  margin: 8px 12px 12px 36px;
+  padding: 10px;
+  border: 1px dashed #cbd5e1;
+  border-radius: var(--radius-sm);
+  color: var(--color-text-muted);
+  font-size: 13px;
+  text-align: center;
+  background-color: var(--color-bg-primary);
+}
+
+.requirement-collapsed-row {
+  margin: 8px 12px 12px 36px;
+  padding: 10px;
+  border: 1px dashed #cbd5e1;
+  border-radius: var(--radius-sm);
+  color: var(--color-text-secondary);
+  font-size: 13px;
+  text-align: center;
+  background-color: var(--color-bg-primary);
+}
+
 .col {
   display: flex;
   align-items: center;
@@ -451,6 +780,32 @@ function getStageLabel(stage: string): string {
   font-size: 14px;
   font-weight: 500;
   color: var(--color-text-primary);
+}
+
+.task-title-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.item-type {
+  font-size: 11px;
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  background-color: #e0f2fe;
+  color: #0369a1;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.item-type.requirement {
+  background-color: #e2e8f0;
+  color: #334155;
+}
+
+.requirement-toggle {
+  padding: 2px 8px;
 }
 
 .task-desc {
@@ -490,5 +845,27 @@ function getStageLabel(stage: string): string {
   flex: 0.8;
   font-size: 13px;
   color: var(--color-text-secondary);
+}
+
+.muted {
+  color: var(--color-text-muted);
+  font-size: 13px;
+}
+
+.btn-sm {
+  padding: 4px 8px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+@media (max-width: 980px) {
+  .page-header {
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+
+  .requirement-toolbar {
+    margin-right: 0;
+  }
 }
 </style>

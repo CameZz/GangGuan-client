@@ -13,6 +13,7 @@ interface TaskFilters {
   stage?: TaskStage
   priority?: TaskPriority
   assigneeId?: string | null
+  myParticipationOnly?: boolean
 }
 
 const memberStore = useMemberStore()
@@ -22,6 +23,7 @@ const selectedStatus = ref<TaskStatus | ''>('')
 const selectedStage = ref<TaskStage | ''>('')
 const selectedPriority = ref<TaskPriority | ''>('')
 const selectedAssigneeId = ref<string | null>(null)
+const myParticipationOnly = ref(false)
 
 const statusOptions = [
   { value: '', label: '全部状态' },
@@ -43,12 +45,13 @@ const priorityOptions = [
   { value: 'high', label: '高' }
 ]
 
-watch([selectedStatus, selectedStage, selectedPriority, selectedAssigneeId], () => {
+watch([selectedStatus, selectedStage, selectedPriority, selectedAssigneeId, myParticipationOnly], () => {
   emit('filter', {
     status: selectedStatus.value as TaskStatus || undefined,
     stage: selectedStage.value as TaskStage || undefined,
     priority: selectedPriority.value as TaskPriority || undefined,
-    assigneeId: selectedAssigneeId.value
+    assigneeId: selectedAssigneeId.value,
+    myParticipationOnly: myParticipationOnly.value
   })
 }, { immediate: true })
 
@@ -57,10 +60,15 @@ function clearFilters() {
   selectedStage.value = ''
   selectedPriority.value = ''
   selectedAssigneeId.value = null
+  myParticipationOnly.value = false
 }
 
 const hasActiveFilters = computed(() => {
-  return selectedStatus.value || selectedStage.value || selectedPriority.value || selectedAssigneeId.value !== null
+  return selectedStatus.value ||
+    selectedStage.value ||
+    selectedPriority.value ||
+    selectedAssigneeId.value !== null ||
+    myParticipationOnly.value
 })
 </script>
 
@@ -92,6 +100,11 @@ const hasActiveFilters = computed(() => {
         </option>
       </select>
 
+      <label class="filter-toggle">
+        <input type="checkbox" v-model="myParticipationOnly" />
+        <span>自己参与的任务</span>
+      </label>
+
       <button v-if="hasActiveFilters" class="btn btn-ghost" @click="clearFilters">
         清除筛选
       </button>
@@ -116,5 +129,22 @@ const hasActiveFilters = computed(() => {
 .filter-select {
   flex: 1;
   min-width: 150px;
+}
+
+.filter-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 36px;
+  color: var(--color-text-secondary);
+  font-size: 14px;
+  white-space: nowrap;
+}
+
+.filter-toggle input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--color-primary);
+  cursor: pointer;
 }
 </style>

@@ -2,7 +2,7 @@
 import { ref, computed, watchEffect } from 'vue'
 import { useRoute } from 'vue-router'
 import { useTaskStore, useProjectStore, useMemberStore, usePlanningStore, useUserStore } from '@/stores'
-import { ROLES, TASK_STAGES } from '@/types'
+import { ROLES } from '@/types'
 import type { RoleType } from '@/types'
 
 const route = useRoute()
@@ -96,7 +96,7 @@ const daySlots = computed<DaySlot[]>(() => {
 })
 
 // All tasks (global view, no project/planning filter)
-const allTasks = computed(() => tasks.value)
+const allTasks = computed(() => tasks.value.filter(t => taskStore.isTaskItem(t)))
 
 // Group tasks by memberId
 interface MemberTaskItem {
@@ -105,6 +105,23 @@ interface MemberTaskItem {
   rowIndex: number
   zIndex: number
   isShadowed: boolean
+}
+
+const getScheduleParticipants = (task: typeof tasks.value[0]): NonNullable<typeof tasks.value[0]['participants'][0]>[] => {
+  const participants = [...task.participants]
+  const existingMemberIds = new Set(participants.map(participant => participant.memberId).filter(Boolean))
+  for (const phase of task.phases) {
+    if (!phase.assigneeId || existingMemberIds.has(phase.assigneeId)) continue
+    const member = members.value.find(item => item.id === phase.assigneeId)
+    participants.push({
+      roleType: member?.role || 'planner',
+      memberId: phase.assigneeId,
+      startTime: task.dueDate,
+      endTime: task.dueDate
+    })
+    existingMemberIds.add(phase.assigneeId)
+  }
+  return participants
 }
 
 const assignRowIndices = (items: Array<Omit<MemberTaskItem, 'rowIndex' | 'zIndex' | 'isShadowed'>>): MemberTaskItem[] => {
@@ -144,7 +161,7 @@ const memberScheduleData = computed(() => {
 
   for (const task of allTasks.value) {
     if (currentProjectId.value && task.projectId !== currentProjectId.value) continue
-    for (const participant of task.participants) {
+    for (const participant of getScheduleParticipants(task)) {
       if (!participant.memberId || !participant.startTime) continue
       const taskStart = new Date(participant.startTime).getTime()
       const taskEnd = participant.endTime ? new Date(participant.endTime).getTime() : taskStart + 24 * 60 * 60 * 1000
@@ -286,16 +303,11 @@ const tooltipY = ref(0)
 const tooltipData = ref<{ taskName: string, planningName: string, stage: string, priority: string } | null>(null)
 
 const priorityLabels: Record<string, string> = { low: '低', medium: '中', high: '高' }
-const getStageName = (stage: string): string => {
-  const s = TASK_STAGES.find(t => t.value === stage)
-  return s?.label || stage
-}
-
 const showTooltip = (e: MouseEvent, item: MemberTaskItem) => {
   tooltipData.value = {
     taskName: item.task.title,
     planningName: getPlanningName(item.task.planningId, item.task.projectId),
-    stage: getStageName(item.task.stage),
+    stage: taskStore.getTaskStageLabel(item.task),
     priority: priorityLabels[item.task.priority] || item.task.priority
   }
   tooltipX.value = e.clientX + 12

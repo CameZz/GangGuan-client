@@ -91,7 +91,7 @@ const daySlots = computed<DaySlot[]>(() => {
 
 // Filtered tasks
 const filteredTasks = computed(() => {
-  let result = tasks.value
+  let result = tasks.value.filter(t => taskStore.isTaskItem(t))
 
   if (selectedProjectId.value) {
     result = result.filter(t => t.projectId === selectedProjectId.value)
@@ -102,7 +102,7 @@ const filteredTasks = computed(() => {
   }
 
   if (filterStage.value) {
-    result = result.filter(t => t.stage === filterStage.value)
+    result = result.filter(t => taskStore.getTaskStageValue(t) === filterStage.value)
   }
 
   if (filterPriority.value) {
@@ -205,9 +205,8 @@ const getMemberName = (memberId: string): string => {
   return member?.name || '未知'
 }
 
-const getStageName = (stage: string): string => {
-  const s = TASK_STAGES.find(t => t.value === stage)
-  return s?.label || stage
+const getTaskStageName = (task: typeof tasks.value[0]): string => {
+  return taskStore.getTaskStageLabel(task)
 }
 
 const priorityLabels: Record<string, string> = {
@@ -355,7 +354,7 @@ const dayIndexToVisibleCol = computed(() => {
           <div class="task-info">
             <div class="task-title">{{ task.title }}</div>
             <div class="task-meta">
-              <span class="task-stage" :class="`stage-${task.stage}`">{{ getStageName(task.stage) }}</span>
+              <span class="task-stage" :class="`stage-${taskStore.getTaskStageValue(task)}`">{{ getTaskStageName(task) }}</span>
             </div>
           </div>
 

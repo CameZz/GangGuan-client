@@ -2,6 +2,8 @@
 
 export type TaskStatus = 'todo' | 'in-progress' | 'done' | 'abandoned'
 export type TaskPriority = 'low' | 'medium' | 'high'
+export type TaskItemType = 'requirement' | 'task'
+export type TaskPhaseStatus = 'pending' | 'in-progress' | 'done'
 
 // Role types
 export type RoleType = 'pm' | 'planner' | 'artist' | 'ui' | 'server' | 'client' | 'devops' | 'animator' | 'sound' | 'tester'
@@ -38,11 +40,19 @@ export const TASK_STAGES = [
   { value: 'completed', label: '完成' }
 ] as const
 
+export interface ProjectPhaseTemplate {
+  id: string
+  name: string
+  order: number
+  enabled: boolean
+}
+
 export interface Project {
   id: string
   name: string
   description: string
   createdAt: string
+  phaseTemplates: ProjectPhaseTemplate[]
   nonWorkdays: string[]    // 应上班但休息的日期（如节假日）
   extraWorkdays: string[]  // 应休息但上班的日期（如加班）
 }
@@ -82,6 +92,16 @@ export interface Participant {
   endTime: string | null
 }
 
+export interface TaskPhase {
+  id: string
+  templateId: string
+  name: string
+  order: number
+  assigneeId: string | null
+  progress: number
+  status: TaskPhaseStatus
+}
+
 export interface Reference {
   type: 'design' | 'ui' | 'document' | 'link'
   url: string
@@ -109,6 +129,7 @@ export const HISTORY_FIELD_LABELS: Record<string, string> = {
   status: '状态',
   priority: '优先级',
   stage: '任务阶段',
+  phases: '阶段进度',
   assigneeId: '负责人',
   dueDate: '截止日期',
   title: '标题',
@@ -137,6 +158,8 @@ export function formatHistoryValue(field: string, value: string): string {
 
 export interface Task {
   id: string
+  itemType: TaskItemType
+  parentRequirementId: string | null
   title: string
   description: string
   status: TaskStatus
@@ -147,6 +170,8 @@ export interface Task {
   createdAt: string
   updatedAt: string
   stage: TaskStage
+  phases: TaskPhase[]
+  currentPhaseId: string | null
   planningId: string | null
   participants: Participant[]
   references: Reference[]

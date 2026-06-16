@@ -1,19 +1,14 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import type { Project, Task } from '@/types'
-import { useProjectStore, useTaskStore, useMemberStore, useUserStore } from '@/stores'
+import type { Project } from '@/types'
+import { useProjectStore, useUserStore } from '@/stores'
 import ProjectModal from '@/components/project/ProjectModal.vue'
-import TaskCard from '@/components/task/TaskCard.vue'
-import TaskModalComponent from '@/components/task/TaskModal.vue'
-import MemberAvatar from '@/components/member/MemberAvatar.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
 
 const route = useRoute()
 const router = useRouter()
 const projectStore = useProjectStore()
-const taskStore = useTaskStore()
-const memberStore = useMemberStore()
 const userStore = useUserStore()
 
 const projectId = computed(() => route.params.id as string)
@@ -22,72 +17,41 @@ const project = computed(() => {
   return projectStore.projects.find(p => p.id === projectId.value)
 })
 
-const projectTasks = computed(() => {
-  return taskStore.tasks.filter(t => t.projectId === projectId.value)
-})
-
-const tasksByStatus = computed(() => ({
-  todo: projectTasks.value.filter(t => t.status === 'todo'),
-  inProgress: projectTasks.value.filter(t => t.status === 'in-progress'),
-  done: projectTasks.value.filter(t => t.status === 'done'),
-  abandoned: projectTasks.value.filter(t => t.status === 'abandoned')
-}))
-
-const assignedMemberIds = computed(() => {
-  const ids = new Set<string>()
-  projectTasks.value.forEach(t => {
-    if (t.assigneeId) ids.add(t.assigneeId)
-  })
-  return Array.from(ids)
-})
-
-const assignedMembers = computed(() => {
-  return assignedMemberIds.value.map(id => memberStore.getMemberById(id)).filter(Boolean)
-})
-
-const stats = computed(() => ({
-  total: projectTasks.value.length,
-  todo: tasksByStatus.value.todo.length,
-  inProgress: tasksByStatus.value.inProgress.length,
-  done: tasksByStatus.value.done.length,
-  abandoned: tasksByStatus.value.abandoned.length,
-  completion: projectTasks.value.length > 0
-    ? Math.round((tasksByStatus.value.done.length / projectTasks.value.length) * 100)
-    : 0
-}))
-
 const isProjectModalOpen = ref(false)
-const isTaskModalOpen = ref(false)
-const selectedTask = ref<Task | null>(null)
+const newPhaseName = ref('')
+const canManageProject = computed(() => userStore.isProjectManager)
+
+const phaseTemplates = computed(() => {
+  return project.value?.phaseTemplates || []
+})
+
+const enabledPhaseCount = computed(() => {
+  return phaseTemplates.value.filter(template => template.enabled).length
+})
+
+const createdDate = computed(() => {
+  return project.value ? new Date(project.value.createdAt).toLocaleDateString() : '-'
+})
+
+const workdayAdjustmentCount = computed(() => {
+  return (project.value?.nonWorkdays.length || 0) + (project.value?.extraWorkdays.length || 0)
+})
 
 watch(projectId, (id) => {
   projectStore.setCurrentProject(id)
 }, { immediate: true })
 
 function openEditProjectModal() {
+  if (!canManageProject.value) return
   isProjectModalOpen.value = true
-}
-
-function openNewTaskModal() {
-  selectedTask.value = null
-  isTaskModalOpen.value = true
-}
-
-function openEditTaskModal(task: Task) {
-  selectedTask.value = task
-  isTaskModalOpen.value = true
 }
 
 function closeProjectModal() {
   isProjectModalOpen.value = false
 }
 
-function closeTaskModal() {
-  isTaskModalOpen.value = false
-  selectedTask.value = null
-}
-
 function handleProjectSave(projectData: Partial<Project>) {
+  if (!canManageProject.value) return
   if (project.value) {
     projectStore.updateProject(project.value.id, projectData)
   }
@@ -95,37 +59,36 @@ function handleProjectSave(projectData: Partial<Project>) {
 }
 
 function handleProjectDelete() {
+  if (!canManageProject.value) return
   if (project.value) {
     projectStore.deleteProject(project.value.id)
     router.push('/kanban')
   }
 }
 
-function handleTaskSave(taskData: Partial<Task>) {
-  if (selectedTask.value) {
-    taskStore.updateTask(selectedTask.value.id, taskData, userStore.currentUser?.id)
-  } else {
-    taskStore.createTask({
-      title: taskData.title || '',
-      description: taskData.description || '',
-      status: taskData.status || 'todo',
-      priority: taskData.priority || 'medium',
-      dueDate: taskData.dueDate || null,
-      projectId: projectId.value,
-      assigneeId: taskData.assigneeId || null,
-      stage: taskData.stage || 'filed',
-      planningId: taskData.planningId || null,
-      participants: taskData.participants || [],
-      references: taskData.references || [],
-      comments: taskData.comments || []
-    })
-  }
-  closeTaskModal()
+function addPhaseTemplate() {
+  if (!canManageProject.value) return
+  if (!project.value || !newPhaseName.value.trim()) return
+  projectStore.addPhaseTemplate(project.value.id, newPhaseName.value)
+  newPhaseName.value = ''
 }
 
-function handleTaskDelete(taskId: string) {
-  taskStore.deleteTask(taskId)
-  closeTaskModal()
+function renamePhaseTemplate(templateId: string, name: string) {
+  if (!canManageProject.value) return
+  if (!project.value) return
+  projectStore.updatePhaseTemplate(project.value.id, templateId, { name })
+}
+
+function togglePhaseTemplate(templateId: string, enabled: boolean) {
+  if (!canManageProject.value) return
+  if (!project.value) return
+  projectStore.updatePhaseTemplate(project.value.id, templateId, { enabled })
+}
+
+function movePhaseTemplate(templateId: string, direction: 'up' | 'down') {
+  if (!canManageProject.value) return
+  if (!project.value) return
+  projectStore.movePhaseTemplate(project.value.id, templateId, direction)
 }
 
 function goToKanban() {
@@ -149,7 +112,7 @@ function goToList() {
           <p class="page-subtitle">{{ project.description }}</p>
         </div>
         <div class="header-actions">
-          <button class="btn btn-secondary" @click="openEditProjectModal">编辑项目</button>
+          <button v-if="canManageProject" class="btn btn-secondary" @click="openEditProjectModal">编辑项目</button>
           <div class="view-switcher">
             <button class="btn btn-ghost" @click="goToKanban">看板</button>
             <button class="btn btn-ghost" @click="goToList">列表</button>
@@ -157,65 +120,80 @@ function goToList() {
         </div>
       </div>
 
-      <!-- Project Stats -->
-      <div class="stats-row">
-        <div class="stat-card">
-          <span class="stat-value">{{ stats.total }}</span>
-          <span class="stat-label">任务总数</span>
-        </div>
-        <div class="stat-card">
-          <span class="stat-value todo">{{ stats.todo }}</span>
-          <span class="stat-label">待办</span>
-        </div>
-        <div class="stat-card">
-          <span class="stat-value progress">{{ stats.inProgress }}</span>
-          <span class="stat-label">进行中</span>
-        </div>
-        <div class="stat-card">
-          <span class="stat-value done">{{ stats.done }}</span>
-          <span class="stat-label">已完成</span>
-        </div>
-        <div class="stat-card">
-          <span class="stat-value">{{ stats.completion }}%</span>
-          <span class="stat-label">完成度</span>
-        </div>
-      </div>
-
-      <!-- Team Members -->
-      <div class="section">
-        <h2 class="section-title">团队 ({{ assignedMembers.length }})</h2>
-        <div class="team-list">
-          <div v-for="member in assignedMembers" :key="member!.id" class="team-member">
-            <MemberAvatar :member="member" size="md" show-name />
+      <div class="project-detail-layout">
+        <section class="section project-info-section">
+          <div class="section-header">
+            <h2 class="section-title">项目信息</h2>
           </div>
-          <div v-if="assignedMembers.length === 0" class="no-members">
-            暂无成员分配
+          <div class="info-grid">
+            <div class="info-item info-item-wide">
+              <span class="info-label">项目描述</span>
+              <p class="info-value description">{{ project.description || '暂无描述' }}</p>
+            </div>
+            <div class="info-item">
+              <span class="info-label">创建时间</span>
+              <span class="info-value">{{ createdDate }}</span>
+            </div>
+            <div class="info-item">
+              <span class="info-label">阶段总数</span>
+              <span class="info-value">{{ phaseTemplates.length }}</span>
+            </div>
+            <div class="info-item">
+              <span class="info-label">启用阶段</span>
+              <span class="info-value">{{ enabledPhaseCount }}</span>
+            </div>
+            <div class="info-item">
+              <span class="info-label">工作日调整</span>
+              <span class="info-value">{{ workdayAdjustmentCount }}</span>
+            </div>
           </div>
-        </div>
-      </div>
+        </section>
 
-      <!-- Tasks Preview -->
-      <div class="section">
-        <div class="section-header">
-          <h2 class="section-title">最近任务</h2>
-          <button class="btn btn-primary btn-sm" @click="openNewTaskModal">添加任务</button>
-        </div>
-        <div class="tasks-grid">
-          <TaskCard
-            v-for="task in projectTasks.slice(0, 6)"
-            :key="task.id"
-            :task="task"
-            @click="openEditTaskModal(task)"
-          />
-        </div>
-        <div v-if="projectTasks.length === 0" class="empty-tasks">
-          <EmptyState
-            title="暂无任务"
-            description="为该项目创建您的第一个任务"
-            action-text="创建任务"
-            @action="openNewTaskModal"
-          />
-        </div>
+        <section class="section phase-section">
+          <div class="section-header">
+            <h2 class="section-title">阶段库</h2>
+            <div v-if="canManageProject" class="phase-add">
+              <input
+                v-model="newPhaseName"
+                type="text"
+                class="input phase-input"
+                placeholder="新增阶段"
+                @keyup.enter="addPhaseTemplate"
+              />
+              <button class="btn btn-secondary btn-sm" :disabled="!newPhaseName.trim()" @click="addPhaseTemplate">添加</button>
+            </div>
+          </div>
+          <div class="phase-library">
+            <div
+              v-for="(template, index) in phaseTemplates"
+              :key="template.id"
+              class="phase-template-row"
+              :class="{ disabled: !template.enabled, readonly: !canManageProject }"
+            >
+              <div class="phase-order">{{ index + 1 }}</div>
+              <input
+                v-if="canManageProject"
+                :value="template.name"
+                class="input phase-name-input"
+                @change="renamePhaseTemplate(template.id, ($event.target as HTMLInputElement).value)"
+              />
+              <div v-else class="phase-name-text">{{ template.name }}</div>
+              <label v-if="canManageProject" class="phase-enabled">
+                <input
+                  type="checkbox"
+                  :checked="template.enabled"
+                  @change="togglePhaseTemplate(template.id, ($event.target as HTMLInputElement).checked)"
+                />
+                <span>{{ template.enabled ? '启用' : '停用' }}</span>
+              </label>
+              <span v-else class="phase-enabled-text">{{ template.enabled ? '启用' : '停用' }}</span>
+              <div v-if="canManageProject" class="phase-actions">
+                <button class="btn btn-ghost btn-sm" :disabled="index === 0" @click="movePhaseTemplate(template.id, 'up')">上移</button>
+                <button class="btn btn-ghost btn-sm" :disabled="index === phaseTemplates.length - 1" @click="movePhaseTemplate(template.id, 'down')">下移</button>
+              </div>
+            </div>
+          </div>
+        </section>
       </div>
     </template>
 
@@ -229,7 +207,7 @@ function goToList() {
     </template>
 
     <ProjectModal
-      v-if="project"
+      v-if="project && canManageProject"
       :is-open="isProjectModalOpen"
       :project="project"
       @close="closeProjectModal"
@@ -237,30 +215,30 @@ function goToList() {
       @delete="handleProjectDelete"
     />
 
-    <TaskModalComponent
-      :is-open="isTaskModalOpen"
-      :task="selectedTask"
-      @close="closeTaskModal"
-      @save="handleTaskSave"
-      @delete="handleTaskDelete"
-    />
   </div>
 </template>
 
 <style scoped>
 .project-detail {
-  max-width: 1200px;
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 100%;
+  min-height: calc(100vh - 64px);
+  display: flex;
+  flex-direction: column;
 }
 
 .page-header {
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
+  gap: 24px;
   margin-bottom: 24px;
 }
 
 .header-content {
   flex: 1;
+  min-width: 0;
 }
 
 .project-title-row {
@@ -286,12 +264,17 @@ function goToList() {
 .page-title {
   font-size: 24px;
   font-weight: 600;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .page-subtitle {
   font-size: 14px;
   color: var(--color-text-secondary);
+  line-height: 1.6;
   margin-left: 60px;
+  max-width: 960px;
+  overflow-wrap: anywhere;
 }
 
 .header-actions {
@@ -307,55 +290,23 @@ function goToList() {
   padding: 4px;
 }
 
-.stats-row {
+.project-detail-layout {
+  flex: 1;
   display: grid;
-  grid-template-columns: repeat(5, 1fr);
-  gap: 16px;
-  margin-bottom: 32px;
-}
-
-.stat-card {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  padding: 16px;
-  background-color: var(--color-bg-primary);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-}
-
-.stat-value {
-  font-size: 24px;
-  font-weight: 600;
-  color: var(--color-text-primary);
-}
-
-.stat-value.todo {
-  color: #d97706;
-}
-
-.stat-value.progress {
-  color: #2563eb;
-}
-
-.stat-value.done {
-  color: #16a34a;
-}
-
-.stat-label {
-  font-size: 12px;
-  color: var(--color-text-muted);
-  margin-top: 4px;
+  grid-template-columns: minmax(280px, 0.72fr) minmax(520px, 1.28fr);
+  gap: 24px;
+  align-items: start;
 }
 
 .section {
-  margin-bottom: 32px;
+  min-width: 0;
 }
 
 .section-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: 16px;
   margin-bottom: 16px;
 }
 
@@ -363,42 +314,197 @@ function goToList() {
   font-size: 16px;
   font-weight: 600;
   color: var(--color-text-primary);
-  margin-bottom: 16px;
+  margin: 0;
 }
 
-.team-list {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 12px;
-}
-
-.team-member {
-  padding: 8px 12px;
-  background-color: var(--color-bg-primary);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-full);
-}
-
-.no-members {
-  color: var(--color-text-muted);
-  font-size: 14px;
-}
-
-.tasks-grid {
+.info-grid {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
 }
 
-.empty-tasks {
-  padding: 24px;
+.info-item {
+  min-height: 86px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 16px;
   background-color: var(--color-bg-primary);
   border: 1px solid var(--color-border);
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-md);
+}
+
+.info-item-wide {
+  grid-column: 1 / -1;
+  min-height: 148px;
+}
+
+.info-label {
+  font-size: 12px;
+  color: var(--color-text-muted);
+}
+
+.info-value {
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  overflow-wrap: anywhere;
+}
+
+.info-value.description {
+  font-size: 14px;
+  font-weight: 400;
+  color: var(--color-text-secondary);
+  line-height: 1.7;
+  white-space: pre-wrap;
+}
+
+.phase-add {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.phase-input {
+  width: 220px;
+}
+
+.phase-library {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.phase-template-row {
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr) 120px 152px;
+  align-items: center;
+  gap: 12px;
+  min-height: 56px;
+  padding: 12px 14px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background-color: var(--color-bg-primary);
+}
+
+.phase-template-row.readonly {
+  grid-template-columns: 40px minmax(0, 1fr) 120px;
+}
+
+.phase-template-row.disabled {
+  opacity: 0.62;
+}
+
+.phase-order {
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-sm);
+  background-color: var(--color-bg-tertiary);
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.phase-name-input {
+  min-width: 0;
+}
+
+.phase-name-text {
+  min-width: 0;
+  font-size: 14px;
+  color: var(--color-text-primary);
+  overflow-wrap: anywhere;
+}
+
+.phase-enabled {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--color-text-secondary);
+  font-size: 13px;
+}
+
+.phase-enabled input {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--color-primary);
+}
+
+.phase-enabled-text {
+  color: var(--color-text-secondary);
+  font-size: 13px;
+}
+
+.phase-actions {
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
 }
 
 .btn-sm {
   padding: 6px 12px;
   font-size: 13px;
+}
+
+@media (max-width: 1100px) {
+  .project-detail-layout {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 720px) {
+  .page-header {
+    flex-direction: column;
+  }
+
+  .page-subtitle {
+    margin-left: 0;
+  }
+
+  .header-actions,
+  .section-header,
+  .phase-add {
+    width: 100%;
+    align-items: stretch;
+  }
+
+  .header-actions,
+  .phase-add {
+    flex-direction: column;
+  }
+
+  .view-switcher {
+    width: 100%;
+  }
+
+  .view-switcher .btn {
+    flex: 1;
+  }
+
+  .info-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .phase-input {
+    width: 100%;
+  }
+
+  .phase-template-row,
+  .phase-template-row.readonly {
+    grid-template-columns: 32px minmax(0, 1fr);
+  }
+
+  .phase-enabled,
+  .phase-enabled-text,
+  .phase-actions {
+    grid-column: 2;
+  }
+
+  .phase-actions {
+    justify-content: flex-start;
+  }
 }
 </style>

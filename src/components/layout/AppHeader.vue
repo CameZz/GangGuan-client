@@ -9,6 +9,7 @@ const projectStore = useProjectStore()
 
 const isLoggedIn = computed(() => userStore.isLoggedIn)
 const isAdmin = computed(() => userStore.isAdmin)
+const isProjectManager = computed(() => userStore.isProjectManager)
 const currentUser = computed(() => userStore.currentUser)
 const currentProject = computed(() => projectStore.currentProject)
 const selectedPlanningId = computed(() => projectStore.selectedPlanningId)
@@ -26,6 +27,10 @@ function getNavLink(path: string): string {
     return `${base}?planning=${selectedPlanningId.value}`
   }
   return base
+}
+
+function getProjectDetailLink(): string {
+  return currentProject.value ? `/project/${currentProject.value.id}` : '/projects'
 }
 </script>
 
@@ -51,6 +56,7 @@ function getNavLink(path: string): string {
         <router-link :to="getNavLink('/timeline')" class="nav-link">时间轴</router-link>
         <router-link :to="getNavLink('/member-schedule')" class="nav-link">成员排期</router-link>
         <router-link :to="getNavLink('/members')" class="nav-link">成员</router-link>
+        <router-link v-if="isProjectManager" :to="getProjectDetailLink()" class="nav-link">项目详情</router-link>
         <router-link v-if="isAdmin" to="/admin" class="nav-link">管理</router-link>
       </nav>
     </div>
@@ -75,6 +81,7 @@ function getNavLink(path: string): string {
 
 <style scoped>
 .header {
+  box-sizing: border-box;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -82,12 +89,15 @@ function getNavLink(path: string): string {
   padding: 0 24px;
   background-color: var(--color-bg-primary);
   border-bottom: 1px solid var(--color-border);
+  max-width: 100vw;
+  gap: 16px;
 }
 
 .header-left {
   display: flex;
   align-items: center;
   gap: 24px;
+  min-width: 0;
 }
 
 .project-info {
@@ -97,6 +107,7 @@ function getNavLink(path: string): string {
   padding: 0 12px;
   border-left: 1px solid var(--color-border);
   border-right: 1px solid var(--color-border);
+  min-width: 0;
 }
 
 .project-icon {
@@ -117,6 +128,7 @@ function getNavLink(path: string): string {
   display: flex;
   flex-direction: column;
   gap: 2px;
+  min-width: 0;
 }
 
 .project-name {
@@ -124,6 +136,9 @@ function getNavLink(path: string): string {
   font-weight: 600;
   color: var(--color-text-primary);
   line-height: 1.2;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .btn-switch {
@@ -144,14 +159,23 @@ function getNavLink(path: string): string {
   font-size: 20px;
   font-weight: 700;
   color: var(--color-primary);
+  flex-shrink: 0;
 }
 
 .nav {
   display: flex;
   gap: 8px;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.nav::-webkit-scrollbar {
+  display: none;
 }
 
 .nav-link {
+  flex: 0 0 auto;
   padding: 8px 16px;
   font-size: 14px;
   font-weight: 500;
@@ -175,6 +199,7 @@ function getNavLink(path: string): string {
   display: flex;
   align-items: center;
   gap: 12px;
+  flex-shrink: 0;
 }
 
 .user-info {
@@ -207,5 +232,45 @@ function getNavLink(path: string): string {
 .btn-sm {
   padding: 6px 12px;
   font-size: 13px;
+}
+
+@media (max-width: 820px) {
+  .header {
+    height: auto;
+    min-height: 64px;
+    padding: 8px 16px;
+    flex-wrap: wrap;
+  }
+
+  .header-left {
+    flex: 1 1 100%;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+
+  .project-info {
+    flex: 1 1 180px;
+  }
+
+  .nav {
+    flex: 1 1 100%;
+    order: 3;
+    padding-bottom: 2px;
+  }
+
+  .header-right {
+    margin-left: auto;
+  }
+}
+
+@media (max-width: 520px) {
+  .user-name,
+  .btn-switch svg {
+    display: none;
+  }
+
+  .nav-link {
+    padding: 8px 12px;
+  }
 }
 </style>

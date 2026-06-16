@@ -34,14 +34,13 @@ const filteredUsers = computed(() => {
 
   // Filter by planning if selected - get all participants from tasks in this planning
   if (planningId.value) {
-    const planningTasks = taskStore.tasks.filter(t => t.planningId === planningId.value)
+    const planningTasks = taskStore.tasks.filter(t => taskStore.isTaskItem(t) && t.planningId === planningId.value)
 
     // Get all unique participant memberIds
-    const participantIds = planningTasks.flatMap(t =>
-      t.participants
-        .map(p => p.memberId)
-        .filter(Boolean)
-    )
+    const participantIds = planningTasks.flatMap(t => [
+      ...t.participants.map(p => p.memberId).filter(Boolean),
+      ...t.phases.map(phase => phase.assigneeId).filter(Boolean)
+    ])
     const uniqueParticipantIds = [...new Set(participantIds)] as string[]
 
     result = result.filter(u => uniqueParticipantIds.includes(u.id))
@@ -56,35 +55,29 @@ const filteredUsers = computed(() => {
 })
 
 function getMemberTaskCount(userId: string): number {
-  let tasks = taskStore.tasks.filter(t => t.projectId === projectId.value)
+  let tasks = taskStore.tasks.filter(t => taskStore.isTaskItem(t) && t.projectId === projectId.value)
   if (planningId.value) {
     tasks = tasks.filter(t => t.planningId === planningId.value)
   }
-  return tasks.filter(t =>
-    t.assigneeId === userId ||
-    t.participants.some(p => p.memberId === userId)
-  ).length
+  return tasks.filter(t => taskStore.isUserParticipating(t, userId)).length
 }
 
 function getMemberDoneCount(userId: string): number {
-  let tasks = taskStore.tasks.filter(t => t.projectId === projectId.value)
+  let tasks = taskStore.tasks.filter(t => taskStore.isTaskItem(t) && t.projectId === projectId.value)
   if (planningId.value) {
     tasks = tasks.filter(t => t.planningId === planningId.value)
   }
-  return tasks.filter(t =>
-    (t.assigneeId === userId || t.participants.some(p => p.memberId === userId)) &&
-    t.status === 'done'
-  ).length
+  return tasks.filter(t => taskStore.isUserParticipating(t, userId) && t.status === 'done').length
 }
 
 function getMemberOverdueCount(userId: string): number {
   const now = new Date()
-  let tasks = taskStore.tasks.filter(t => t.projectId === projectId.value)
+  let tasks = taskStore.tasks.filter(t => taskStore.isTaskItem(t) && t.projectId === projectId.value)
   if (planningId.value) {
     tasks = tasks.filter(t => t.planningId === planningId.value)
   }
   return tasks.filter(t => {
-    const isParticipant = t.assigneeId === userId || t.participants.some(p => p.memberId === userId)
+    const isParticipant = taskStore.isUserParticipating(t, userId)
     if (!isParticipant) return false
     if (t.status === 'done' || t.status === 'abandoned') return false
     if (!t.dueDate) return false
