@@ -2,7 +2,7 @@
 
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import type { ProjectPhaseTemplate, Task, TaskPhase, TaskStatus, TaskPriority, TaskHistory } from '@/types'
+import type { ProjectPhaseTemplate, Task, TaskPhase, TaskStatus, TaskPriority, TaskHistory, TaskProgressHistory } from '@/types'
 import { formatHistoryValue } from '@/types'
 import mockApi from '@/utils/mock'
 import { useUserStore } from './user'
@@ -148,7 +148,6 @@ export const useTaskStore = defineStore('task', () => {
         parentRequirementId: null,
         assigneeId: null,
         dueDate: null,
-        participants: [],
         phases: [],
         currentPhaseId: null
       }
@@ -199,16 +198,46 @@ export const useTaskStore = defineStore('task', () => {
 
   const HISTORY_FIELDS = ['status', 'priority', 'stage', 'phases', 'assigneeId', 'dueDate', 'title', 'description'] as const
 
+  function recordProgressHistories(taskId: string, oldPhases: TaskPhase[], newPhases: TaskPhase[], operatorId: string) {
+    const oldById = new Map(normalizeTaskPhases(oldPhases).map(phase => [phase.id, phase]))
+    for (const phase of normalizeTaskPhases(newPhases)) {
+      const oldPhase = oldById.get(phase.id)
+      if (!oldPhase || oldPhase.progress === phase.progress) continue
+      mockApi.addTaskProgressHistory({
+        taskId,
+        phaseId: phase.id,
+        phaseName: phase.name,
+        assigneeId: phase.assigneeId,
+        operatorId,
+        oldProgress: oldPhase.progress,
+        newProgress: phase.progress
+      })
+    }
+  }
+
+  function isPureProgressPhaseChange(oldPhases: TaskPhase[], newPhases: TaskPhase[]): boolean {
+    const stripProgress = (phases: TaskPhase[]) => normalizeTaskPhases(phases).map(phase => ({
+      ...phase,
+      progress: 0,
+      status: 'pending'
+    }))
+    return JSON.stringify(stripProgress(oldPhases)) === JSON.stringify(stripProgress(newPhases))
+  }
+
   function updateTask(id: string, data: Partial<Task>, operatorId?: string) {
     const oldTask = tasks.value.find(t => t.id === id)
     if (oldTask && operatorId) {
       const userStore = useUserStore()
       const memberStore = useMemberStore()
       const resolvedOperatorId = operatorId || userStore.currentUser?.id || ''
+      if (data.phases) {
+        recordProgressHistories(id, oldTask.phases || [], data.phases, resolvedOperatorId)
+      }
       for (const field of HISTORY_FIELDS) {
         if (data[field] === undefined) continue
         const oldVal = oldTask[field]
         const newVal = data[field]
+        if (field === 'phases' && isPureProgressPhaseChange(oldVal as TaskPhase[], newVal as TaskPhase[])) continue
         const oldStr = field === 'phases' ? JSON.stringify(oldVal ?? []) : String(oldVal ?? '')
         const newStr = field === 'phases' ? JSON.stringify(newVal ?? []) : String(newVal ?? '')
         if (oldStr === newStr) continue
@@ -261,13 +290,24 @@ export const useTaskStore = defineStore('task', () => {
 
   function isUserParticipating(task: Task, userId: string): boolean {
     return task.assigneeId === userId ||
-      task.participants.some(p => p.memberId === userId) ||
       normalizeTaskPhases(task.phases).some(phase => phase.assigneeId === userId)
   }
 
   // Filter tasks
   function getTaskHistories(taskId: string): TaskHistory[] {
     return mockApi.getTaskHistories(taskId)
+  }
+
+  function getTaskProgressHistories(taskId: string): TaskProgressHistory[] {
+    return mockApi.getTaskProgressHistories(taskId)
+  }
+
+  function getProjectTaskProgressHistories(projectId: string): TaskProgressHistory[] {
+    const projectTaskIds = new Set(tasks.value.filter(task => task.projectId === projectId).map(task => task.id))
+    return tasks.value
+      .filter(task => projectTaskIds.has(task.id))
+      .flatMap(task => mockApi.getTaskProgressHistories(task.id))
+      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
   }
 
   function getTasksByFilters(filters: {
@@ -336,6 +376,8 @@ export const useTaskStore = defineStore('task', () => {
     canEditTaskPhaseProgress,
     isUserParticipating,
     getTaskHistories,
+    getTaskProgressHistories,
+    getProjectTaskProgressHistories,
     getTasksByFilters
   }
 })

@@ -85,13 +85,6 @@ export interface Planning {
   createdAt: string
 }
 
-export interface Participant {
-  roleType: RoleType
-  memberId: string
-  startTime: string | null
-  endTime: string | null
-}
-
 export interface TaskPhase {
   id: string
   templateId: string
@@ -100,6 +93,8 @@ export interface TaskPhase {
   assigneeId: string | null
   progress: number
   status: TaskPhaseStatus
+  startTime: string | null
+  endTime: string | null
 }
 
 export interface Reference {
@@ -122,6 +117,18 @@ export interface TaskHistory {
   field: string
   oldValue: string
   newValue: string
+  createdAt: string
+}
+
+export interface TaskProgressHistory {
+  id: string
+  taskId: string
+  phaseId: string
+  phaseName: string
+  assigneeId: string | null
+  operatorId: string
+  oldProgress: number
+  newProgress: number
   createdAt: string
 }
 
@@ -173,7 +180,6 @@ export interface Task {
   phases: TaskPhase[]
   currentPhaseId: string | null
   planningId: string | null
-  participants: Participant[]
   references: Reference[]
   comments: Comment[]
 }

@@ -52,7 +52,9 @@ export function normalizeTaskPhases(phases?: TaskPhase[]): TaskPhase[] {
         order: Number.isFinite(phase.order) ? phase.order : index,
         assigneeId: phase.assigneeId || null,
         progress,
-        status: getPhaseStatus(progress)
+        status: getPhaseStatus(progress),
+        startTime: phase.startTime || null,
+        endTime: phase.endTime || null
       }
     })
     .sort((a, b) => a.order - b.order)
@@ -71,7 +73,9 @@ export function createTaskPhaseFromTemplate(
     order,
     assigneeId,
     progress: 0,
-    status: 'pending'
+    status: 'pending',
+    startTime: null,
+    endTime: null
   }
 }
 
@@ -89,7 +93,9 @@ export function createLegacyTaskPhase(
     order: 0,
     assigneeId,
     progress,
-    status: getPhaseStatus(progress)
+    status: getPhaseStatus(progress),
+    startTime: null,
+    endTime: null
   }
 }
 

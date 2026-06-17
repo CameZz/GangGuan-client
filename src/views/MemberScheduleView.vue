@@ -1,9 +1,9 @@
 <script setup lang="ts">
-import { ref, computed, watchEffect } from 'vue'
+import { ref, computed, nextTick, watchEffect } from 'vue'
 import { useRoute } from 'vue-router'
 import { useTaskStore, useProjectStore, useMemberStore, usePlanningStore, useUserStore } from '@/stores'
 import { ROLES } from '@/types'
-import type { RoleType } from '@/types'
+import type { RoleType, Task, TaskPhase } from '@/types'
 
 const route = useRoute()
 const taskStore = useTaskStore()
@@ -17,10 +17,12 @@ const members = computed(() => memberStore.members)
 const plannings = computed(() => planningStore.plannings)
 const projects = computed(() => projectStore.projects)
 
-const GRID_SLOT_WIDTH = 100
+const GRID_SLOT_WIDTH = 50
 const MEMBER_INFO_WIDTH = 180
 const MEMBER_INFO_PADDING_X = 16
 const MEMBER_INFO_TOTAL_WIDTH = MEMBER_INFO_WIDTH + MEMBER_INFO_PADDING_X * 2 + 1
+const scheduleScrollBody = ref<HTMLElement | null>(null)
+const activeView = ref<'schedule' | 'progress'>('schedule')
 
 const filterRoles = ref<RoleType[]>([])
 
@@ -58,6 +60,13 @@ const yearOptions = computed(() => {
 })
 
 const monthOptions = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+
+const formatDateKey = (date: Date): string => {
+  const y = date.getFullYear()
+  const m = String(date.getMonth() + 1).padStart(2, '0')
+  const d = String(date.getDate()).padStart(2, '0')
+  return `${y}-${m}-${d}`
+}
 
 // Timeline range from selected year/month
 const timelineStart = computed(() => {
@@ -98,36 +107,45 @@ const daySlots = computed<DaySlot[]>(() => {
 // All tasks (global view, no project/planning filter)
 const allTasks = computed(() => tasks.value.filter(t => taskStore.isTaskItem(t)))
 
+const taskById = computed(() => {
+  const map = new Map<string, Task>()
+  for (const task of allTasks.value) {
+    map.set(task.id, task)
+  }
+  return map
+})
+
+const monthProgressHistories = computed(() => {
+  if (!currentProjectId.value) return []
+  const rangeStart = timelineStart.value.getTime()
+  const rangeEnd = timelineEnd.value.getTime() + 24 * 60 * 60 * 1000
+  return taskStore.getProjectTaskProgressHistories(currentProjectId.value).filter(history => {
+    const changedAt = new Date(history.createdAt).getTime()
+    return changedAt >= rangeStart && changedAt < rangeEnd
+  })
+})
+
+const progressOwnerIds = computed(() => {
+  const ids = new Set<string>()
+  for (const history of monthProgressHistories.value) {
+    if (history.assigneeId) ids.add(history.assigneeId)
+  }
+  return ids
+})
+
 // Group tasks by memberId
 interface MemberTaskItem {
   task: typeof tasks.value[0]
-  participant: NonNullable<typeof tasks.value[0]['participants'][0]>
+  phase: TaskPhase
   rowIndex: number
   zIndex: number
   isShadowed: boolean
 }
 
-const getScheduleParticipants = (task: typeof tasks.value[0]): NonNullable<typeof tasks.value[0]['participants'][0]>[] => {
-  const participants = [...task.participants]
-  const existingMemberIds = new Set(participants.map(participant => participant.memberId).filter(Boolean))
-  for (const phase of task.phases) {
-    if (!phase.assigneeId || existingMemberIds.has(phase.assigneeId)) continue
-    const member = members.value.find(item => item.id === phase.assigneeId)
-    participants.push({
-      roleType: member?.role || 'planner',
-      memberId: phase.assigneeId,
-      startTime: task.dueDate,
-      endTime: task.dueDate
-    })
-    existingMemberIds.add(phase.assigneeId)
-  }
-  return participants
-}
-
 const assignRowIndices = (items: Array<Omit<MemberTaskItem, 'rowIndex' | 'zIndex' | 'isShadowed'>>): MemberTaskItem[] => {
   const sortedItems = [...items].sort((a, b) => {
-    const aStart = a.participant.startTime ? new Date(a.participant.startTime).getTime() : Number.MAX_SAFE_INTEGER
-    const bStart = b.participant.startTime ? new Date(b.participant.startTime).getTime() : Number.MAX_SAFE_INTEGER
+    const aStart = a.phase.startTime ? new Date(a.phase.startTime).getTime() : Number.MAX_SAFE_INTEGER
+    const bStart = b.phase.startTime ? new Date(b.phase.startTime).getTime() : Number.MAX_SAFE_INTEGER
     return aStart - bStart
   })
 
@@ -136,8 +154,8 @@ const assignRowIndices = (items: Array<Omit<MemberTaskItem, 'rowIndex' | 'zIndex
     for (let i = 0; i < index; i++) {
       const earlier = sortedItems[i]
       if (rangesOverlap(
-        { start: item.participant.startTime, end: item.participant.endTime },
-        { start: earlier.participant.startTime, end: earlier.participant.endTime }
+        { start: item.phase.startTime, end: item.phase.endTime },
+        { start: earlier.phase.startTime, end: earlier.phase.endTime }
       )) {
         isShadowed = true
         break
@@ -161,19 +179,25 @@ const memberScheduleData = computed(() => {
 
   for (const task of allTasks.value) {
     if (currentProjectId.value && task.projectId !== currentProjectId.value) continue
-    for (const participant of getScheduleParticipants(task)) {
-      if (!participant.memberId || !participant.startTime) continue
-      const taskStart = new Date(participant.startTime).getTime()
-      const taskEnd = participant.endTime ? new Date(participant.endTime).getTime() : taskStart + 24 * 60 * 60 * 1000
+    for (const phase of task.phases) {
+      if (!phase.assigneeId || !phase.startTime) continue
+      const taskStart = new Date(phase.startTime).getTime()
+      const taskEnd = phase.endTime ? new Date(phase.endTime).getTime() : taskStart + 24 * 60 * 60 * 1000
       if (taskEnd < rangeStart || taskStart >= rangeEnd) continue
-      if (!memberMap.has(participant.memberId)) {
-        memberMap.set(participant.memberId, [])
+      if (!memberMap.has(phase.assigneeId)) {
+        memberMap.set(phase.assigneeId, [])
       }
-      memberMap.get(participant.memberId)!.push({ task, participant })
+      memberMap.get(phase.assigneeId)!.push({ task, phase })
     }
   }
 
-  // Build member list (only current project participants)
+  for (const memberId of progressOwnerIds.value) {
+    if (!memberMap.has(memberId)) {
+      memberMap.set(memberId, [])
+    }
+  }
+
+  // Build member list (only current project members)
   const result: Array<{
     memberId: string
     memberName: string
@@ -228,6 +252,111 @@ const getPlanningName = (planningId: string | null, projectId?: string): string 
   return p.name
 }
 
+interface ProgressDetail {
+  id: string
+  taskTitle: string
+  planningName: string
+  phaseName: string
+  ownerName: string
+  operatorName: string
+  oldProgress: number
+  newProgress: number
+  delta: number
+  createdAt: string
+}
+
+interface ProgressCell {
+  memberId: string
+  memberName: string
+  dateKey: string
+  dateLabel: string
+  count: number
+  netDelta: number
+  details: ProgressDetail[]
+}
+
+interface MemberProgressRow {
+  memberId: string
+  memberName: string
+  memberAvatar: string
+  memberRole: RoleType
+  cells: Array<ProgressCell | null>
+}
+
+const getMemberName = (memberId: string | null): string => {
+  if (!memberId) return '未分配'
+  return members.value.find(member => member.id === memberId)?.name || '未知成员'
+}
+
+const formatSignedDelta = (delta: number): string => `${delta >= 0 ? '+' : ''}${delta}pp`
+
+const memberProgressData = computed<MemberProgressRow[]>(() => {
+  const grouped = new Map<string, Map<string, ProgressDetail[]>>()
+
+  for (const history of monthProgressHistories.value) {
+    if (!history.assigneeId) continue
+    const task = taskById.value.get(history.taskId)
+    if (!task) continue
+    const dateKey = formatDateKey(new Date(history.createdAt))
+    if (!grouped.has(history.assigneeId)) grouped.set(history.assigneeId, new Map())
+    const ownerDays = grouped.get(history.assigneeId)!
+    if (!ownerDays.has(dateKey)) ownerDays.set(dateKey, [])
+    ownerDays.get(dateKey)!.push({
+      id: history.id,
+      taskTitle: task.title,
+      planningName: getPlanningName(task.planningId, task.projectId),
+      phaseName: history.phaseName,
+      ownerName: getMemberName(history.assigneeId),
+      operatorName: getMemberName(history.operatorId),
+      oldProgress: history.oldProgress,
+      newProgress: history.newProgress,
+      delta: history.newProgress - history.oldProgress,
+      createdAt: history.createdAt
+    })
+  }
+
+  const rows: MemberProgressRow[] = []
+  for (const [memberId, dayMap] of grouped) {
+    const member = members.value.find(m => m.id === memberId)
+    if (!member) continue
+    if (filterRoles.value.length > 0 && !filterRoles.value.includes(member.role)) continue
+
+    const cells = visibleDaySlots.value.map(day => {
+      const dateKey = formatDateKey(day.date)
+      const details = dayMap.get(dateKey)
+      if (!details || details.length === 0) return null
+      const sortedDetails = [...details].sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
+      return {
+        memberId,
+        memberName: member.name,
+        dateKey,
+        dateLabel: day.dateStr,
+        count: sortedDetails.length,
+        netDelta: sortedDetails.reduce((sum, detail) => sum + detail.delta, 0),
+        details: sortedDetails
+      }
+    })
+
+    if (cells.some(Boolean)) {
+      rows.push({
+        memberId,
+        memberName: member.name,
+        memberAvatar: member.avatar,
+        memberRole: member.role,
+        cells
+      })
+    }
+  }
+
+  return rows.sort((a, b) => a.memberName.localeCompare(b.memberName))
+})
+
+const selectedProgressCell = ref<ProgressCell | null>(null)
+
+const selectProgressCell = (cell: ProgressCell | null) => {
+  selectedProgressCell.value = cell
+}
+
 // Slot index calculation
 const getSlotIndex = (timestamp: string): number => {
   const date = new Date(timestamp)
@@ -257,10 +386,10 @@ const clampToVisible = (dayIndex: number, direction: 'forward' | 'backward'): nu
   return undefined
 }
 
-// Bar style for a task participant
+// Bar style for a task phase
 const getBarStyle = (item: MemberTaskItem) => {
-  const startTime = item.participant.startTime
-  const endTime = item.participant.endTime
+  const startTime = item.phase.startTime
+  const endTime = item.phase.endTime
   if (!startTime) return { display: 'none' }
 
   const startSlot = getSlotIndex(startTime)
@@ -335,13 +464,6 @@ const getRoleName = (role: RoleType): string => roleNames[role] || role
 // Workday logic
 const canEditWorkday = computed(() => userStore.isAdmin || userStore.currentUser?.role === 'pm')
 
-const formatDateKey = (date: Date): string => {
-  const y = date.getFullYear()
-  const m = String(date.getMonth() + 1).padStart(2, '0')
-  const d = String(date.getDate()).padStart(2, '0')
-  return `${y}-${m}-${d}`
-}
-
 const isWorkday = (date: Date): boolean => {
   const key = formatDateKey(date)
   const project = projectStore.currentProject
@@ -405,19 +527,61 @@ const dayIndexToVisibleCol = computed(() => {
 })
 
 const visibleGridWidth = computed(() => `${visibleTotalSlots.value * GRID_SLOT_WIDTH}px`)
+const progressGridWidth = computed(() => `${visibleDaySlots.value.length * GRID_SLOT_WIDTH * 2}px`)
+
+const hasAutoScrolledToToday = ref(false)
+const todayKey = formatDateKey(now)
+
+const scrollScheduleToToday = (): boolean => {
+  const scrollBody = scheduleScrollBody.value
+  if (!scrollBody) return false
+
+  const todayVisibleIndex = visibleDaySlots.value.findIndex(day => formatDateKey(day.date) === todayKey)
+  if (todayVisibleIndex < 0) return false
+
+  const dayWidth = GRID_SLOT_WIDTH * 2
+  const gridViewportWidth = Math.max(scrollBody.clientWidth - MEMBER_INFO_TOTAL_WIDTH, 0)
+  const todayCenter = todayVisibleIndex * dayWidth + dayWidth / 2
+  scrollBody.scrollLeft = Math.max(0, todayCenter - gridViewportWidth / 2)
+  return true
+}
+
+watchEffect(() => {
+  if (hasAutoScrolledToToday.value) return
+  if (selectedYear.value !== now.getFullYear() || selectedMonth.value !== now.getMonth() + 1) return
+  if (memberScheduleData.value.length === 0 && memberProgressData.value.length === 0) return
+  if (visibleDaySlots.value.length === 0) return
+
+  void nextTick(() => {
+    if (hasAutoScrolledToToday.value) return
+    hasAutoScrolledToToday.value = scrollScheduleToToday()
+  })
+})
 
 // Active plannings for legend (with project info)
 const activePlannings = computed(() => {
   const seen = new Set<string>()
   const result: Array<{ id: string, name: string, projectId: string }> = []
+  const visibleProgressTaskIds = new Set(monthProgressHistories.value.map(history => history.taskId))
+  const rangeStart = timelineStart.value.getTime()
+  const rangeEnd = timelineEnd.value.getTime() + 24 * 60 * 60 * 1000
+
   for (const task of allTasks.value) {
+    if (currentProjectId.value && task.projectId !== currentProjectId.value) continue
     if (!task.planningId) continue
+    const hasVisibleSchedule = task.phases.some(phase => {
+      if (!phase.startTime) return false
+      const taskStart = new Date(phase.startTime).getTime()
+      const taskEnd = phase.endTime ? new Date(phase.endTime).getTime() : taskStart + 24 * 60 * 60 * 1000
+      return taskEnd >= rangeStart && taskStart < rangeEnd
+    })
+    if (!hasVisibleSchedule && !visibleProgressTaskIds.has(task.id)) continue
     const key = `${task.projectId}:${task.planningId}`
     if (seen.has(key)) continue
     seen.add(key)
     const planning = plannings.value.find(p => p.id === task.planningId)
     if (planning) {
-      result.push({ id: planning.id, name: `${getProjectName(task.projectId)} - ${planning.name}`, projectId: task.projectId })
+      result.push({ id: planning.id, name: planning.name, projectId: task.projectId })
     }
   }
   return result
@@ -429,6 +593,22 @@ const activePlannings = computed(() => {
     <div class="page-header">
       <div class="header-content">
         <h2>成员排期表</h2>
+        <div class="view-switch" aria-label="成员排期视图切换">
+          <button
+            class="view-switch-button"
+            :class="{ active: activeView === 'schedule' }"
+            @click="activeView = 'schedule'"
+          >
+            成员排期
+          </button>
+          <button
+            class="view-switch-button"
+            :class="{ active: activeView === 'progress' }"
+            @click="activeView = 'progress'"
+          >
+            阶段进度
+          </button>
+        </div>
       </div>
       <div class="header-actions">
         <div class="role-filter-group">
@@ -458,82 +638,185 @@ const activePlannings = computed(() => {
       </div>
     </div>
 
-    <div v-if="memberScheduleData.length === 0" class="empty-state">
-      <p>暂无任务数据</p>
-    </div>
+    <template v-if="activeView === 'schedule'">
+      <div v-if="memberScheduleData.length === 0" class="empty-state">
+        <p>暂无任务数据</p>
+      </div>
 
-    <div v-else class="schedule-wrapper">
-      <div class="schedule-scroll-body">
-        <!-- Header row (sticky top) -->
-        <div class="schedule-row schedule-row--header">
-          <div class="member-info member-info--header">成员</div>
-          <div
-            class="schedule-grid-header"
-            :style="{
-              gridTemplateColumns: `repeat(${visibleTotalSlots}, ${GRID_SLOT_WIDTH}px)`,
-              minWidth: visibleGridWidth
-            }"
-          >
-            <template v-for="(day, vi) in visibleDaySlots" :key="day.dayIndex">
-              <div
-                class="date-label"
-                :class="{ 'non-workday': !isWorkday(day.date), 'can-edit': canEditWorkday }"
-                :style="{ gridColumn: `${vi * 2 + 1} / ${vi * 2 + 3}` }"
-                @click="canEditWorkday ? toggleWorkday(day.date) : undefined"
-              >
-                {{ day.dateStr }}
-                <span v-if="!isWorkday(day.date)" class="rest-badge">休</span>
-              </div>
-            </template>
-          </div>
-        </div>
-
-        <!-- Member rows -->
-        <div
-          v-for="memberData in memberScheduleData"
-          :key="memberData.memberId"
-          class="schedule-row"
-        >
-          <div class="member-info">
-            <img :src="memberData.memberAvatar" :alt="memberData.memberName" class="member-avatar" />
-            <div class="member-details">
-              <div class="member-name">{{ memberData.memberName }}</div>
-              <div class="member-role">{{ getRoleName(memberData.memberRole) }}</div>
+      <div v-else class="schedule-wrapper">
+        <div ref="scheduleScrollBody" class="schedule-scroll-body">
+          <!-- Header row (sticky top) -->
+          <div class="schedule-row schedule-row--header">
+            <div class="member-info member-info--header">成员</div>
+            <div
+              class="schedule-grid-header"
+              :style="{
+                gridTemplateColumns: `repeat(${visibleTotalSlots}, ${GRID_SLOT_WIDTH}px)`,
+                minWidth: visibleGridWidth
+              }"
+            >
+              <template v-for="(day, vi) in visibleDaySlots" :key="day.dayIndex">
+                <div
+                  class="date-label"
+                  :class="{ 'non-workday': !isWorkday(day.date), 'can-edit': canEditWorkday }"
+                  :style="{ gridColumn: `${vi * 2 + 1} / ${vi * 2 + 3}` }"
+                  @click="canEditWorkday ? toggleWorkday(day.date) : undefined"
+                >
+                  {{ day.dateStr }}
+                  <span v-if="!isWorkday(day.date)" class="rest-badge">休</span>
+                </div>
+              </template>
             </div>
           </div>
 
-          <div class="member-grid" :style="{ gridTemplateColumns: `repeat(${visibleTotalSlots}, ${GRID_SLOT_WIDTH}px)`, minWidth: visibleGridWidth }">
-            <!-- Grid cells -->
-            <div
-              v-for="(day, vi) in visibleDaySlots"
-              :key="day.dayIndex"
-              class="grid-cell day-start"
-              :class="{ 'non-workday-cell': !isWorkday(day.date) }"
-              :style="{ gridColumn: `${vi * 2 + 1} / ${vi * 2 + 3}` }"
-            ></div>
+          <!-- Member rows -->
+          <div
+            v-for="memberData in memberScheduleData"
+            :key="memberData.memberId"
+            class="schedule-row"
+          >
+            <div class="member-info">
+              <img :src="memberData.memberAvatar" :alt="memberData.memberName" class="member-avatar" />
+              <div class="member-details">
+                <div class="member-name">{{ memberData.memberName }}</div>
+                <div class="member-role">{{ getRoleName(memberData.memberRole) }}</div>
+              </div>
+            </div>
 
-            <!-- Task bars -->
-            <div
-              v-for="(item, index) in memberData.items"
-              :key="`${item.task.id}-${index}`"
-              class="task-bar"
-              :class="{ 'is-shadowed': item.isShadowed }"
-              :style="{
-                ...getBarStyle(item),
-                backgroundColor: getPlanningColor(item.task.planningId),
-                zIndex: item.zIndex,
-                borderColor: item.isShadowed ? getPlanningColor(item.task.planningId) : undefined
-              }"
-              @mouseenter="showTooltip($event, item)"
-              @mouseleave="hideTooltip"
-              @mousemove="moveTooltip"
-            >
-              <span class="bar-label">{{ item.task.title }}</span>
+            <div class="member-grid" :style="{ gridTemplateColumns: `repeat(${visibleTotalSlots}, ${GRID_SLOT_WIDTH}px)`, minWidth: visibleGridWidth }">
+              <!-- Grid cells -->
+              <div
+                v-for="(day, vi) in visibleDaySlots"
+                :key="day.dayIndex"
+                class="grid-cell day-start"
+                :class="{ 'non-workday-cell': !isWorkday(day.date) }"
+                :style="{ gridColumn: `${vi * 2 + 1} / ${vi * 2 + 3}` }"
+              ></div>
+
+              <!-- Task bars -->
+              <div
+                v-for="(item, index) in memberData.items"
+                :key="`${item.task.id}-${index}`"
+                class="task-bar"
+                :class="{ 'is-shadowed': item.isShadowed }"
+                :style="{
+                  ...getBarStyle(item),
+                  backgroundColor: getPlanningColor(item.task.planningId),
+                  zIndex: item.zIndex,
+                  borderColor: item.isShadowed ? getPlanningColor(item.task.planningId) : undefined
+                }"
+                @mouseenter="showTooltip($event, item)"
+                @mouseleave="hideTooltip"
+                @mousemove="moveTooltip"
+              >
+                <span class="bar-label">{{ item.task.title }}</span>
+              </div>
             </div>
           </div>
         </div>
       </div>
-    </div>
+    </template>
+
+    <template v-else>
+      <div v-if="memberProgressData.length === 0" class="empty-state">
+        <p>暂无阶段进度变更</p>
+      </div>
+
+      <div v-else class="schedule-wrapper progress-wrapper">
+        <div ref="scheduleScrollBody" class="schedule-scroll-body">
+          <div class="schedule-row schedule-row--header">
+            <div class="member-info member-info--header">成员</div>
+            <div
+              class="schedule-grid-header"
+              :style="{
+                gridTemplateColumns: `repeat(${visibleTotalSlots}, ${GRID_SLOT_WIDTH}px)`,
+                minWidth: visibleGridWidth
+              }"
+            >
+              <template v-for="(day, vi) in visibleDaySlots" :key="day.dayIndex">
+                <div
+                  class="date-label"
+                  :class="{ 'non-workday': !isWorkday(day.date), 'can-edit': canEditWorkday }"
+                  :style="{ gridColumn: `${vi * 2 + 1} / ${vi * 2 + 3}` }"
+                  @click="canEditWorkday ? toggleWorkday(day.date) : undefined"
+                >
+                  {{ day.dateStr }}
+                  <span v-if="!isWorkday(day.date)" class="rest-badge">休</span>
+                </div>
+              </template>
+            </div>
+          </div>
+
+          <div
+            v-for="memberData in memberProgressData"
+            :key="memberData.memberId"
+            class="schedule-row"
+          >
+            <div class="member-info">
+              <img :src="memberData.memberAvatar" :alt="memberData.memberName" class="member-avatar" />
+              <div class="member-details">
+                <div class="member-name">{{ memberData.memberName }}</div>
+                <div class="member-role">{{ getRoleName(memberData.memberRole) }}</div>
+              </div>
+            </div>
+
+            <div
+              class="progress-grid"
+              :style="{ gridTemplateColumns: `repeat(${visibleDaySlots.length}, ${GRID_SLOT_WIDTH * 2}px)`, minWidth: progressGridWidth }"
+            >
+              <div
+                v-for="(cell, index) in memberData.cells"
+                :key="visibleDaySlots[index].dayIndex"
+                class="progress-cell"
+                :class="{ 'non-workday-cell': !isWorkday(visibleDaySlots[index].date), selected: cell && selectedProgressCell?.memberId === cell.memberId && selectedProgressCell?.dateKey === cell.dateKey }"
+              >
+                <button
+                  v-if="cell"
+                  class="progress-cell-button"
+                  :class="{ negative: cell.netDelta < 0 }"
+                  @click="selectProgressCell(cell)"
+                >
+                  <span class="progress-cell-count">{{ cell.count }}次</span>
+                  <span class="progress-cell-delta">{{ formatSignedDelta(cell.netDelta) }}</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div v-if="selectedProgressCell" class="progress-detail-panel">
+        <div class="progress-detail-header">
+          <div>
+            <div class="progress-detail-title">{{ selectedProgressCell.memberName }} · {{ selectedProgressCell.dateLabel }}</div>
+            <div class="progress-detail-subtitle">{{ selectedProgressCell.count }}次变更，净变化 {{ formatSignedDelta(selectedProgressCell.netDelta) }}</div>
+          </div>
+          <button class="progress-detail-close" @click="selectProgressCell(null)">关闭</button>
+        </div>
+        <div class="progress-detail-list">
+          <div
+            v-for="detail in selectedProgressCell.details"
+            :key="detail.id"
+            class="progress-detail-item"
+          >
+            <div class="progress-detail-main">
+              <span class="progress-task-title">{{ detail.taskTitle }}</span>
+              <span class="progress-phase-name">{{ detail.phaseName }}</span>
+              <span class="progress-change" :class="{ negative: detail.delta < 0 }">
+                {{ detail.oldProgress }}% → {{ detail.newProgress }}%
+                <strong>{{ formatSignedDelta(detail.delta) }}</strong>
+              </span>
+            </div>
+            <div class="progress-detail-meta">
+              <span>迭代：{{ detail.planningName }}</span>
+              <span>负责人：{{ detail.ownerName }}</span>
+              <span>修改人：{{ detail.operatorName }}</span>
+              <span>{{ new Date(detail.createdAt).toLocaleString('zh-CN') }}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </template>
 
     <!-- Legend -->
     <div class="schedule-legend">
@@ -580,6 +863,44 @@ const activePlannings = computed(() => {
   font-weight: 600;
   color: var(--color-text-primary);
   margin: 0;
+}
+
+.header-content {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.view-switch {
+  display: inline-flex;
+  width: fit-content;
+  padding: 3px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background-color: var(--color-bg-primary);
+}
+
+.view-switch-button {
+  min-width: 88px;
+  height: 30px;
+  padding: 0 12px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.view-switch-button:hover {
+  color: var(--color-primary);
+}
+
+.view-switch-button.active {
+  background-color: var(--color-primary);
+  color: #fff;
 }
 
 .header-actions {
@@ -844,6 +1165,168 @@ const activePlannings = computed(() => {
   font-weight: 500;
   position: relative;
   z-index: 1;
+}
+
+.progress-grid {
+  display: grid;
+  position: relative;
+  min-height: 56px;
+}
+
+.progress-cell {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 56px;
+  padding: 6px;
+  border-right: 1px solid var(--color-border);
+  border-left: 1px solid transparent;
+}
+
+.progress-cell.selected {
+  border-color: var(--color-primary);
+  background-color: rgba(59, 130, 246, 0.08);
+}
+
+.progress-cell-button {
+  display: flex;
+  width: 100%;
+  min-height: 36px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  border: 1px solid #bbf7d0;
+  border-radius: var(--radius-sm);
+  background-color: #dcfce7;
+  color: #15803d;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.progress-cell-button:hover {
+  border-color: #86efac;
+  transform: translateY(-1px);
+}
+
+.progress-cell-button.negative {
+  border-color: #fecaca;
+  background-color: #fee2e2;
+  color: #b91c1c;
+}
+
+.progress-cell-count {
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.progress-cell-delta {
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.progress-detail-panel {
+  margin-top: 16px;
+  padding: 14px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background-color: var(--color-bg-primary);
+}
+
+.progress-detail-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.progress-detail-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--color-text-primary);
+}
+
+.progress-detail-subtitle {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--color-text-muted);
+}
+
+.progress-detail-close {
+  height: 30px;
+  padding: 0 10px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background-color: var(--color-bg-secondary);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+}
+
+.progress-detail-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.progress-detail-item {
+  padding: 10px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background-color: var(--color-bg-tertiary);
+}
+
+.progress-detail-main {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.progress-task-title {
+  min-width: 0;
+  color: var(--color-text-primary);
+  font-size: 13px;
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.progress-phase-name {
+  flex: 0 0 auto;
+  padding: 3px 8px;
+  border-radius: var(--radius-sm);
+  background-color: var(--color-bg-primary);
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.progress-change {
+  flex: 0 0 auto;
+  color: #15803d;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.progress-change.negative {
+  color: #b91c1c;
+}
+
+.progress-change strong {
+  margin-left: 6px;
+}
+
+.progress-detail-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  margin-top: 8px;
+  color: var(--color-text-muted);
+  font-size: 12px;
 }
 
 /* Legend */

@@ -2,8 +2,8 @@
 import { ref, computed, watchEffect } from 'vue'
 import { useRoute } from 'vue-router'
 import { useTaskStore, useProjectStore, useMemberStore, usePlanningStore, useUserStore } from '@/stores'
-import { ROLES, TASK_STAGES } from '@/types'
-import type { RoleType, TaskPriority } from '@/types'
+import { TASK_STAGES } from '@/types'
+import type { Task, TaskPhase } from '@/types'
 
 const route = useRoute()
 const taskStore = useTaskStore()
@@ -16,6 +16,8 @@ const tasks = computed(() => taskStore.tasks)
 const projects = computed(() => projectStore.projects)
 const members = computed(() => memberStore.members)
 const selectedPlanningId = computed(() => projectStore.selectedPlanningId)
+
+const GRID_SLOT_WIDTH = 50
 
 const selectedProjectId = ref<string>('')
 const filterStage = ref<string>('')
@@ -69,6 +71,13 @@ interface DaySlot {
   dayIndex: number
 }
 
+type ScheduledTaskPhase = TaskPhase & {
+  startTime: string
+  endTime: string
+}
+
+type PhaseHealthStatus = 'not-started' | 'on-track' | 'behind' | 'overdue' | 'completed'
+
 const daySlots = computed<DaySlot[]>(() => {
   const start = timelineStart.value
   const end = timelineEnd.value
@@ -88,6 +97,33 @@ const daySlots = computed<DaySlot[]>(() => {
   }
   return days
 })
+
+const clamp = (value: number, min: number, max: number): number => {
+  return Math.min(max, Math.max(min, value))
+}
+
+const isScheduledPhase = (phase: TaskPhase): phase is ScheduledTaskPhase => {
+  return Boolean(phase.startTime && phase.endTime)
+}
+
+const isPhaseInVisibleRange = (phase: ScheduledTaskPhase): boolean => {
+  const rangeStart = timelineStart.value.getTime()
+  const rangeEnd = timelineEnd.value.getTime() + 24 * 60 * 60 * 1000
+  const phaseStart = new Date(phase.startTime).getTime()
+  const phaseEnd = new Date(phase.endTime).getTime()
+  return phaseEnd >= rangeStart && phaseStart < rangeEnd
+}
+
+const getTaskPhaseBars = (task: Task): ScheduledTaskPhase[] => {
+  return (task.phases || [])
+    .filter(isScheduledPhase)
+    .filter(isPhaseInVisibleRange)
+    .sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime())
+}
+
+const getTaskPhaseRowCount = (task: Task): number => {
+  return Math.max(getTaskPhaseBars(task).length, 1)
+}
 
 // Filtered tasks
 const filteredTasks = computed(() => {
@@ -109,17 +145,8 @@ const filteredTasks = computed(() => {
     result = result.filter(t => t.priority === filterPriority.value)
   }
 
-  // Filter out tasks with no participants in the visible time range
-  const rangeStart = timelineStart.value.getTime()
-  const rangeEnd = timelineEnd.value.getTime() + 24 * 60 * 60 * 1000
-  result = result.filter(t =>
-    t.participants.some(p => {
-      if (!p.startTime) return false
-      const pStart = new Date(p.startTime).getTime()
-      const pEnd = p.endTime ? new Date(p.endTime).getTime() : pStart + 24 * 60 * 60 * 1000
-      return pEnd >= rangeStart && pStart < rangeEnd
-    })
-  )
+  // Filter out tasks with no scheduled phases in the visible time range.
+  result = result.filter(t => getTaskPhaseBars(t).length > 0)
 
   return result
 })
@@ -177,32 +204,158 @@ const getBarStyle = (startTime: string | null, endTime: string | null) => {
   }
 }
 
-const roleColors: Record<RoleType, string> = {
-  pm: '#6366f1',
-  planner: '#8b5cf6',
-  artist: '#ec4899',
-  ui: '#f43f5e',
-  server: '#14b8a6',
-  client: '#22c55e',
-  devops: '#f59e0b',
-  animator: '#eab308',
-  sound: '#06b6d4',
-  tester: '#3b82f6'
-}
-
-const getRoleColor = (roleType: RoleType): string => {
-  return roleColors[roleType] || '#6b7280'
-}
-
-const getRoleName = (roleType: RoleType): string => {
-  const role = ROLES.find(r => r.type === roleType)
-  return role?.name || roleType
-}
-
 const getMemberName = (memberId: string): string => {
   if (!memberId) return '待分配'
   const member = members.value.find(m => m.id === memberId)
   return member?.name || '未知'
+}
+
+const assigneePalette = [
+  '#2563eb',
+  '#7c3aed',
+  '#db2777',
+  '#dc2626',
+  '#ea580c',
+  '#ca8a04',
+  '#16a34a',
+  '#059669',
+  '#0891b2',
+  '#4f46e5',
+  '#9333ea',
+  '#475569'
+]
+
+const getAssigneeColor = (assigneeId: string | null): string => {
+  if (!assigneeId) return '#64748b'
+  let hash = 0
+  for (let i = 0; i < assigneeId.length; i++) {
+    hash = (hash * 31 + assigneeId.charCodeAt(i)) | 0
+  }
+  return assigneePalette[Math.abs(hash) % assigneePalette.length]
+}
+
+const getPhaseProgressPercent = (phase: TaskPhase): number => {
+  return Math.round(clamp(phase.progress || 0, 0, 100))
+}
+
+const getStartOfDay = (date: Date): Date => {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate())
+}
+
+const getNextDay = (date: Date): Date => {
+  const next = new Date(date)
+  next.setDate(next.getDate() + 1)
+  return next
+}
+
+const getWorkDurationMs = (startMs: number, endMs: number): number => {
+  if (endMs <= startMs) return 0
+
+  let duration = 0
+  let cursor = getStartOfDay(new Date(startMs))
+
+  while (cursor.getTime() < endMs) {
+    const nextDay = getNextDay(cursor)
+    if (isWorkday(cursor)) {
+      const workStart = Math.max(startMs, cursor.getTime())
+      const workEnd = Math.min(endMs, nextDay.getTime())
+      duration += Math.max(workEnd - workStart, 0)
+    }
+    cursor = nextDay
+  }
+
+  return duration
+}
+
+const getExpectedProgress = (phase: ScheduledTaskPhase, nowMs = Date.now()): number => {
+  const start = new Date(phase.startTime).getTime()
+  const end = new Date(phase.endTime).getTime()
+  const workDuration = getWorkDurationMs(start, end)
+
+  if (workDuration <= 0) {
+    return nowMs > end && isWorkday(new Date(nowMs)) ? 100 : 0
+  }
+
+  const elapsedWorkDuration = getWorkDurationMs(start, nowMs)
+  return clamp((elapsedWorkDuration / workDuration) * 100, 0, 100)
+}
+
+const getPhaseHealthStatus = (phase: ScheduledTaskPhase): PhaseHealthStatus => {
+  const progress = getPhaseProgressPercent(phase)
+  const now = Date.now()
+  const start = new Date(phase.startTime).getTime()
+  const end = new Date(phase.endTime).getTime()
+  const workDuration = getWorkDurationMs(start, end)
+  const elapsedWorkDuration = getWorkDurationMs(start, now)
+
+  if (progress >= 100) return 'completed'
+  if (now < start) return 'not-started'
+  if (workDuration <= 0 && now > end && isWorkday(new Date(now))) return 'overdue'
+  if (workDuration > 0 && elapsedWorkDuration > workDuration) return 'overdue'
+  return progress >= getExpectedProgress(phase, now) ? 'on-track' : 'behind'
+}
+
+const phaseProgressColors: Record<PhaseHealthStatus, string> = {
+  'not-started': '#f59e0b',
+  'on-track': '#22c55e',
+  behind: '#ef4444',
+  overdue: '#ef4444',
+  completed: '#22c55e'
+}
+
+const phaseStatusLabels: Record<PhaseHealthStatus, string> = {
+  'not-started': '未开始',
+  'on-track': '正常',
+  behind: '落后',
+  overdue: '超时',
+  completed: '已完成'
+}
+
+const healthLegendItems = [
+  { status: 'not-started' as PhaseHealthStatus, label: '未开始' },
+  { status: 'on-track' as PhaseHealthStatus, label: '正常/超前/完成' },
+  { status: 'behind' as PhaseHealthStatus, label: '落后/超时' }
+]
+
+const getPhaseProgressColor = (phase: ScheduledTaskPhase): string => {
+  return phaseProgressColors[getPhaseHealthStatus(phase)]
+}
+
+const getPhaseAssigneeName = (phase: ScheduledTaskPhase): string => {
+  return phase.assigneeId ? getMemberName(phase.assigneeId) : getMemberName('')
+}
+
+const getPhaseBarStyle = (phase: ScheduledTaskPhase, index: number) => {
+  const progress = getPhaseProgressPercent(phase)
+  return {
+    ...getBarStyle(phase.startTime, phase.endTime),
+    gridRow: `${index + 1}`,
+    borderColor: getAssigneeColor(phase.assigneeId),
+    '--phase-assignee-color': getAssigneeColor(phase.assigneeId),
+    '--phase-progress-color': getPhaseProgressColor(phase),
+    '--phase-progress': `${progress}%`
+  }
+}
+
+const formatPhaseDateTime = (value: string): string => {
+  return new Date(value).toLocaleString('zh-CN', {
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit'
+  })
+}
+
+const getPhaseTooltip = (task: Task, phase: ScheduledTaskPhase): string => {
+  const status = getPhaseHealthStatus(phase)
+  return [
+    `任务：${task.title}`,
+    `阶段：${phase.name}`,
+    `执行者：${getPhaseAssigneeName(phase)}`,
+    `时间：${formatPhaseDateTime(phase.startTime)} - ${formatPhaseDateTime(phase.endTime)}`,
+    `进度：${getPhaseProgressPercent(phase)}%`,
+    `状态：${phaseStatusLabels[status]}`
+  ].join('\n')
 }
 
 const getTaskStageName = (task: typeof tasks.value[0]): string => {
@@ -327,7 +480,7 @@ const dayIndexToVisibleCol = computed(() => {
         <!-- Header row (sticky top) -->
         <div class="timeline-row timeline-row--header">
           <div class="task-info task-info--header">任务</div>
-          <div class="timeline-grid-header" :style="{ gridTemplateColumns: `repeat(${visibleTotalSlots}, 100px)` }">
+          <div class="timeline-grid-header" :style="{ gridTemplateColumns: `repeat(${visibleTotalSlots}, ${GRID_SLOT_WIDTH}px)` }">
             <template v-for="(day, vi) in visibleDaySlots" :key="day.dayIndex">
               <div
                 class="date-label"
@@ -358,26 +511,38 @@ const dayIndexToVisibleCol = computed(() => {
             </div>
           </div>
 
-          <div class="task-grid" :style="{ gridTemplateColumns: `repeat(${visibleTotalSlots}, 100px)` }">
+          <div
+            class="task-grid"
+            :style="{
+              gridTemplateColumns: `repeat(${visibleTotalSlots}, ${GRID_SLOT_WIDTH}px)`,
+              gridTemplateRows: `repeat(${getTaskPhaseRowCount(task)}, 36px)`
+            }"
+          >
             <div
               v-for="(day, vi) in visibleDaySlots"
               :key="day.dayIndex"
               class="grid-cell day-start"
               :class="{ 'non-workday-cell': !isWorkday(day.date) }"
-              :style="{ gridColumn: `${vi * 2 + 1} / ${vi * 2 + 3}` }"
+              :style="{
+                gridColumn: `${vi * 2 + 1} / ${vi * 2 + 3}`,
+                gridRow: `1 / ${getTaskPhaseRowCount(task) + 1}`
+              }"
             ></div>
 
             <div
-              v-for="(participant, pIndex) in task.participants"
-              :key="pIndex"
-              class="participant-bar"
-              :style="{
-                ...getBarStyle(participant.startTime, participant.endTime),
-                backgroundColor: getRoleColor(participant.roleType)
-              }"
-              :title="`${getRoleName(participant.roleType)}: ${getMemberName(participant.memberId)}`"
+              v-for="(phase, pIndex) in getTaskPhaseBars(task)"
+              :key="phase.id"
+              class="phase-bar"
+              :style="getPhaseBarStyle(phase, pIndex)"
+              :title="getPhaseTooltip(task, phase)"
             >
-              <span class="bar-label">{{ getRoleName(participant.roleType) }}</span>
+              <span class="phase-progress-fill"></span>
+              <span class="phase-assignee-dot"></span>
+              <span class="bar-label">
+                <span class="phase-assignee">{{ getPhaseAssigneeName(phase) }}</span>
+                <span class="phase-name">{{ phase.name }}</span>
+                <span class="phase-progress-text">{{ getPhaseProgressPercent(phase) }}%</span>
+              </span>
             </div>
           </div>
         </div>
@@ -387,12 +552,12 @@ const dayIndexToVisibleCol = computed(() => {
     <!-- Legend -->
     <div class="timeline-legend">
       <div
-        v-for="role in ROLES"
-        :key="role.type"
+        v-for="item in healthLegendItems"
+        :key="item.status"
         class="legend-item"
       >
-        <span class="legend-color" :style="{ backgroundColor: getRoleColor(role.type) }"></span>
-        <span class="legend-label">{{ role.name }}</span>
+        <span class="legend-color" :style="{ backgroundColor: phaseProgressColors[item.status] }"></span>
+        <span class="legend-label">{{ item.label }}</span>
       </div>
     </div>
   </div>
@@ -598,30 +763,33 @@ const dayIndexToVisibleCol = computed(() => {
 .task-grid {
   display: grid;
   min-width: fit-content;
+  min-height: 48px;
   position: relative;
 }
 
 .grid-cell {
   border-right: 1px solid var(--color-border);
   opacity: 0.3;
-  min-height: 48px;
+  min-height: 100%;
 }
 
 .grid-cell.day-start {
   border-left: 2px solid var(--color-border);
 }
 
-/* Participant bars */
-.participant-bar {
+/* Phase bars */
+.phase-bar {
   position: relative;
-  height: 24px;
-  margin: 12px 2px;
+  height: 26px;
+  margin: 5px 2px;
   border-radius: var(--radius-sm);
+  border-left: 4px solid var(--phase-assignee-color);
+  background-color: color-mix(in srgb, var(--phase-assignee-color) 14%, var(--color-bg-primary));
   display: flex;
   align-items: center;
-  padding: 0 6px;
+  padding: 0 8px;
   font-size: 10px;
-  color: white;
+  color: var(--color-text-primary);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -630,12 +798,60 @@ const dayIndexToVisibleCol = computed(() => {
   z-index: 2;
 }
 
-.participant-bar:hover {
+.phase-bar:hover {
   opacity: 0.8;
+}
+
+.phase-progress-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: var(--phase-progress);
+  min-width: 2px;
+  background-color: var(--phase-progress-color);
+  opacity: 0.24;
+  border-radius: var(--radius-sm);
+  pointer-events: none;
+}
+
+.phase-assignee-dot {
+  width: 8px;
+  height: 8px;
+  margin-right: 6px;
+  border-radius: 999px;
+  background-color: var(--phase-assignee-color);
+  flex-shrink: 0;
+  position: relative;
+  z-index: 1;
 }
 
 .bar-label {
   font-weight: 500;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  position: relative;
+  z-index: 1;
+}
+
+.phase-assignee,
+.phase-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.phase-assignee {
+  max-width: 72px;
+  flex-shrink: 0;
+}
+
+.phase-name {
+  min-width: 0;
+}
+
+.phase-progress-text {
+  flex-shrink: 0;
+  color: var(--color-text-secondary);
 }
 
 /* Legend */

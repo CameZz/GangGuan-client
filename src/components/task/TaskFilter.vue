@@ -4,6 +4,12 @@ import type { TaskStatus, TaskStage, TaskPriority } from '@/types'
 import { TASK_STAGES } from '@/types'
 import { useMemberStore } from '@/stores'
 
+const props = withDefaults(defineProps<{
+  showStatusFilter?: boolean
+}>(), {
+  showStatusFilter: true
+})
+
 const emit = defineEmits<{
   filter: [filters: TaskFilters]
 }>()
@@ -75,7 +81,7 @@ const hasActiveFilters = computed(() => {
 <template>
   <div class="task-filter">
     <div class="filter-row">
-      <select v-model="selectedStatus" class="input select filter-select">
+      <select v-if="showStatusFilter" v-model="selectedStatus" class="input select filter-select">
         <option v-for="opt in statusOptions" :key="opt.value" :value="opt.value">
           {{ opt.label }}
         </option>
@@ -102,10 +108,10 @@ const hasActiveFilters = computed(() => {
 
       <label class="filter-toggle">
         <input type="checkbox" v-model="myParticipationOnly" />
-        <span>自己参与的任务</span>
+        <span>我的任务</span>
       </label>
 
-      <button v-if="hasActiveFilters" class="btn btn-ghost" @click="clearFilters">
+      <button class="btn btn-ghost" :disabled="!hasActiveFilters" @click="clearFilters">
         清除筛选
       </button>
     </div>

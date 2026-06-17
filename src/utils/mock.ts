@@ -5,6 +5,7 @@ import type {
     Task,
     TaskStatus,
     TaskHistory,
+    TaskProgressHistory,
     Planning,
     User,
 } from "@/types";
@@ -315,6 +316,14 @@ const mockPlannings: Planning[] = [
         projectId: "proj-1",
         createdAt: "2026-05-10T10:00:00Z",
     },
+    // 英勇之地手游 (proj-1) 已完成迭代
+    {
+        id: "plan-4",
+        name: "美术资源制作",
+        deadline: "2026-05-30T00:00:00Z",
+        projectId: "proj-1",
+        createdAt: "2026-04-25T08:00:00Z",
+    },
     // 英勇之地端游 (proj-2) 迭代
     {
         id: "plan-5",
@@ -358,7 +367,6 @@ const normalizeTask = (task: TaskSeed | Task): Task => {
         parentRequirementId: itemType === "requirement" ? null : task.parentRequirementId || null,
         assigneeId: itemType === "requirement" ? null : currentPhase?.assigneeId || task.assigneeId || null,
         dueDate: itemType === "requirement" ? null : task.dueDate,
-        participants: itemType === "requirement" ? [] : task.participants,
         stage,
         status,
         phases,
@@ -386,7 +394,7 @@ const mockTasks: TaskSeed[] = [
         updatedAt: "2026-05-12T15:00:00Z",
         stage: "completed",
         planningId: "plan-1",
-        participants: [],
+
         references: [
             { type: "document", url: "https://docs.example.com/world-setting", title: "世界观设定文档" },
         ],
@@ -410,10 +418,6 @@ const mockTasks: TaskSeed[] = [
         updatedAt: "2026-05-12T15:00:00Z",
         stage: "completed",
         planningId: "plan-1",
-        participants: [
-            { roleType: "pm", memberId: "user-2", startTime: "2026-05-04T00:00:00Z", endTime: "2026-05-12T12:00:00Z" },
-            { roleType: "planner", memberId: "user-4", startTime: "2026-05-04T00:00:00Z", endTime: "2026-05-12T12:00:00Z" },
-        ],
         references: [],
         comments: [],
     },
@@ -434,7 +438,7 @@ const mockTasks: TaskSeed[] = [
         updatedAt: "2026-05-15T16:00:00Z",
         stage: "designing",
         planningId: "plan-1",
-        participants: [],
+
         references: [],
         comments: [],
     },
@@ -454,11 +458,6 @@ const mockTasks: TaskSeed[] = [
         updatedAt: "2026-05-15T16:00:00Z",
         stage: "designing",
         planningId: "plan-1",
-        participants: [
-            { roleType: "pm", memberId: "user-2", startTime: "2026-05-11T00:00:00Z", endTime: "2026-05-22T12:00:00Z" },
-            { roleType: "planner", memberId: "user-4", startTime: "2026-05-08T00:00:00Z", endTime: "2026-05-20T12:00:00Z" },
-            { roleType: "server", memberId: "user-3", startTime: "2026-05-14T00:00:00Z", endTime: "2026-05-22T12:00:00Z" },
-        ],
         references: [],
         comments: [],
     },
@@ -481,7 +480,7 @@ const mockTasks: TaskSeed[] = [
         updatedAt: "2026-05-20T12:00:00Z",
         stage: "initial",
         planningId: "plan-2",
-        participants: [],
+
         references: [
             { type: "design", url: "https://figma.com/combat-design", title: "战斗系统设计稿" },
         ],
@@ -503,11 +502,6 @@ const mockTasks: TaskSeed[] = [
         updatedAt: "2026-05-20T12:00:00Z",
         stage: "initial",
         planningId: "plan-2",
-        participants: [
-            { roleType: "pm", memberId: "user-2", startTime: "2026-05-13T00:00:00Z", endTime: "2026-05-29T12:00:00Z" },
-            { roleType: "server", memberId: "user-3", startTime: "2026-05-18T00:00:00Z", endTime: "2026-05-29T12:00:00Z" },
-            { roleType: "client", memberId: "user-5", startTime: "2026-05-18T00:00:00Z", endTime: "2026-05-29T12:00:00Z" },
-        ],
         references: [],
         comments: [],
     },
@@ -527,10 +521,6 @@ const mockTasks: TaskSeed[] = [
         updatedAt: "2026-05-18T10:00:00Z",
         stage: "initial",
         planningId: "plan-2",
-        participants: [
-            { roleType: "client", memberId: "user-5", startTime: "2026-05-14T00:00:00Z", endTime: "2026-05-25T12:00:00Z" },
-            { roleType: "animator", memberId: "user-16", startTime: "2026-05-20T00:00:00Z", endTime: "2026-05-25T12:00:00Z" },
-        ],
         references: [],
         comments: [],
     },
@@ -550,10 +540,6 @@ const mockTasks: TaskSeed[] = [
         updatedAt: "2026-05-18T14:00:00Z",
         stage: "designing",
         planningId: "plan-2",
-        participants: [
-            { roleType: "animator", memberId: "user-16", startTime: "2026-05-18T00:00:00Z", endTime: "2026-05-27T12:00:00Z" },
-            { roleType: "artist", memberId: "user-8", startTime: "2026-05-18T00:00:00Z", endTime: "2026-05-27T12:00:00Z" },
-        ],
         references: [],
         comments: [],
     },
@@ -576,7 +562,7 @@ const mockTasks: TaskSeed[] = [
         updatedAt: "2026-05-20T00:00:00Z",
         stage: "designing",
         planningId: "plan-3",
-        participants: [],
+
         references: [],
         comments: [],
     },
@@ -596,10 +582,40 @@ const mockTasks: TaskSeed[] = [
         updatedAt: "2026-05-18T10:00:00Z",
         stage: "filed",
         planningId: "plan-3",
-        participants: [
-            { roleType: "pm", memberId: "user-2", startTime: "2026-05-18T00:00:00Z", endTime: "2026-06-05T12:00:00Z" },
-            { roleType: "planner", memberId: "user-4", startTime: "2026-05-25T00:00:00Z", endTime: "2026-06-05T12:00:00Z" },
-            { roleType: "server", memberId: "user-3", startTime: "2026-05-25T00:00:00Z", endTime: "2026-06-05T12:00:00Z" },
+        phases: [
+            {
+                id: "task-6-phase-1",
+                templateId: "filed",
+                name: "Plan Review",
+                order: 0,
+                assigneeId: "user-2",
+                progress: 100,
+                status: "done",
+                startTime: "2026-05-18T00:00:00Z",
+                endTime: "2026-05-22T12:00:00Z",
+            },
+            {
+                id: "task-6-phase-2",
+                templateId: "designing",
+                name: "System Design",
+                order: 1,
+                assigneeId: "user-4",
+                progress: 100,
+                status: "done",
+                startTime: "2026-05-25T00:00:00Z",
+                endTime: "2026-06-05T12:00:00Z",
+            },
+            {
+                id: "task-6-phase-3",
+                templateId: "initial",
+                name: "Server Dev",
+                order: 2,
+                assigneeId: "user-3",
+                progress: 35,
+                status: "in-progress",
+                startTime: "2026-06-06T00:00:00Z",
+                endTime: "2026-06-20T12:00:00Z",
+            },
         ],
         references: [],
         comments: [],
@@ -620,9 +636,40 @@ const mockTasks: TaskSeed[] = [
         updatedAt: "2026-05-20T00:00:00Z",
         stage: "filed",
         planningId: "plan-3",
-        participants: [
-            { roleType: "server", memberId: "user-12", startTime: "2026-05-25T00:00:00Z", endTime: "2026-06-10T12:00:00Z" },
-            { roleType: "client", memberId: "user-5", startTime: "2026-05-26T00:00:00Z", endTime: "2026-06-10T12:00:00Z" },
+        phases: [
+            {
+                id: "task-7-phase-1",
+                templateId: "filed",
+                name: "Plan Review",
+                order: 0,
+                assigneeId: "user-2",
+                progress: 100,
+                status: "done",
+                startTime: "2026-06-10T00:00:00Z",
+                endTime: "2026-06-12T12:00:00Z",
+            },
+            {
+                id: "task-7-phase-2",
+                templateId: "designing",
+                name: "Data Model",
+                order: 1,
+                assigneeId: "user-12",
+                progress: 80,
+                status: "in-progress",
+                startTime: "2026-06-12T00:00:00Z",
+                endTime: "2026-06-20T12:00:00Z",
+            },
+            {
+                id: "task-7-phase-3",
+                templateId: "initial",
+                name: "Client Hook",
+                order: 2,
+                assigneeId: "user-5",
+                progress: 0,
+                status: "pending",
+                startTime: "2026-06-18T00:00:00Z",
+                endTime: "2026-06-20T12:00:00Z",
+            },
         ],
         references: [],
         comments: [],
@@ -643,9 +690,29 @@ const mockTasks: TaskSeed[] = [
         updatedAt: "2026-05-18T11:00:00Z",
         stage: "designing",
         planningId: "plan-3",
-        participants: [
-            { roleType: "ui", memberId: "user-10", startTime: "2026-05-11T00:00:00Z", endTime: "2026-05-30T12:00:00Z" },
-            { roleType: "artist", memberId: "user-8", startTime: "2026-05-20T00:00:00Z", endTime: "2026-05-30T12:00:00Z" },
+        phases: [
+            {
+                id: "task-8-phase-1",
+                templateId: "designing",
+                name: "UI Draft",
+                order: 0,
+                assigneeId: "user-10",
+                progress: 60,
+                status: "in-progress",
+                startTime: "2026-05-20T00:00:00Z",
+                endTime: "2026-05-30T12:00:00Z",
+            },
+            {
+                id: "task-8-phase-2",
+                templateId: "initial",
+                name: "Art Polish",
+                order: 1,
+                assigneeId: "user-3",
+                progress: 0,
+                status: "pending",
+                startTime: "2026-06-17T00:00:00Z",
+                endTime: "2026-06-20T12:00:00Z",
+            },
         ],
         references: [
             { type: "ui", url: "https://figma.com/character-ui", title: "角色面板UI设计" },
@@ -669,7 +736,7 @@ const mockTasks: TaskSeed[] = [
         updatedAt: "2026-05-25T16:00:00Z",
         stage: "initial",
         planningId: "plan-2",
-        participants: [],
+
         references: [
             { type: "document", url: "https://docs.example.com/social-system", title: "社交系统设计文档" },
         ],
@@ -693,10 +760,6 @@ const mockTasks: TaskSeed[] = [
         updatedAt: "2026-05-25T18:00:00Z",
         stage: "completed",
         planningId: "plan-2",
-        participants: [
-            { roleType: "server", memberId: "user-12", startTime: "2026-05-20T00:00:00Z", endTime: "2026-05-25T12:00:00Z" },
-            { roleType: "client", memberId: "user-5", startTime: "2026-05-20T00:00:00Z", endTime: "2026-05-25T12:00:00Z" },
-        ],
         references: [],
         comments: [
             { id: "com-11", authorId: "user-12", content: "好友系统开发完成，已通过测试", createdAt: "2026-05-25T17:00:00Z" },
@@ -718,10 +781,6 @@ const mockTasks: TaskSeed[] = [
         updatedAt: "2026-05-28T10:00:00Z",
         stage: "initial",
         planningId: "plan-2",
-        participants: [
-            { roleType: "server", memberId: "user-3", startTime: "2026-05-22T00:00:00Z", endTime: "2026-05-30T12:00:00Z" },
-            { roleType: "client", memberId: "user-13", startTime: "2026-05-24T00:00:00Z", endTime: "2026-05-30T12:00:00Z" },
-        ],
         references: [],
         comments: [],
     },
@@ -741,10 +800,6 @@ const mockTasks: TaskSeed[] = [
         updatedAt: "2026-05-25T14:00:00Z",
         stage: "filed",
         planningId: "plan-2",
-        participants: [
-            { roleType: "server", memberId: "user-12", startTime: "2026-05-28T00:00:00Z", endTime: "2026-06-05T12:00:00Z" },
-            { roleType: "client", memberId: "user-5", startTime: "2026-05-30T00:00:00Z", endTime: "2026-06-05T12:00:00Z" },
-        ],
         references: [],
         comments: [],
     },
@@ -764,7 +819,7 @@ const mockTasks: TaskSeed[] = [
         updatedAt: "2026-05-26T09:00:00Z",
         stage: "filed",
         planningId: "plan-2",
-        participants: [],
+
         references: [],
         comments: [
             { id: "com-12", authorId: "user-2", content: "排行榜功能移至下个版本实现", createdAt: "2026-05-26T09:00:00Z" },
@@ -787,7 +842,7 @@ const mockTasks: TaskSeed[] = [
         updatedAt: "2026-05-28T14:00:00Z",
         stage: "initial",
         planningId: "plan-3",
-        participants: [],
+
         references: [],
         comments: [],
     },
@@ -807,9 +862,6 @@ const mockTasks: TaskSeed[] = [
         updatedAt: "2026-05-22T16:00:00Z",
         stage: "completed",
         planningId: "plan-3",
-        participants: [
-            { roleType: "server", memberId: "user-12", startTime: "2026-05-18T00:00:00Z", endTime: "2026-05-22T12:00:00Z" },
-        ],
         references: [],
         comments: [],
     },
@@ -829,10 +881,6 @@ const mockTasks: TaskSeed[] = [
         updatedAt: "2026-05-26T14:00:00Z",
         stage: "initial",
         planningId: "plan-3",
-        participants: [
-            { roleType: "ui", memberId: "user-10", startTime: "2026-05-20T00:00:00Z", endTime: "2026-05-28T12:00:00Z" },
-            { roleType: "client", memberId: "user-5", startTime: "2026-05-22T00:00:00Z", endTime: "2026-05-28T12:00:00Z" },
-        ],
         references: [
             { type: "ui", url: "https://figma.com/shop-ui", title: "商城UI设计稿" },
         ],
@@ -854,10 +902,6 @@ const mockTasks: TaskSeed[] = [
         updatedAt: "2026-05-28T11:00:00Z",
         stage: "designing",
         planningId: "plan-3",
-        participants: [
-            { roleType: "server", memberId: "user-3", startTime: "2026-05-22T00:00:00Z", endTime: "2026-06-01T12:00:00Z" },
-            { roleType: "devops", memberId: "user-14", startTime: "2026-05-25T00:00:00Z", endTime: "2026-06-01T12:00:00Z" },
-        ],
         references: [],
         comments: [],
     },
@@ -877,10 +921,151 @@ const mockTasks: TaskSeed[] = [
         updatedAt: "2026-05-25T10:00:00Z",
         stage: "filed",
         planningId: "plan-3",
-        participants: [
-            { roleType: "server", memberId: "user-12", startTime: "2026-06-01T00:00:00Z", endTime: "2026-06-08T12:00:00Z" },
-            { roleType: "planner", memberId: "user-4", startTime: "2026-05-28T00:00:00Z", endTime: "2026-06-08T12:00:00Z" },
+        references: [],
+        comments: [],
+    },
+
+    // --- 美术资源制作 (plan-4) - 已完成迭代 ---
+
+    // 需求单: 角色美术资源
+    {
+        id: "req-9",
+        itemType: "requirement",
+        parentRequirementId: null,
+        title: "角色美术资源",
+        description: "完成游戏内主要角色的美术资源制作，包括角色立绘、模型、动画",
+        status: "done",
+        priority: "high",
+        dueDate: null,
+        projectId: "proj-1",
+        assigneeId: null,
+        createdAt: "2026-04-25T08:00:00Z",
+        updatedAt: "2026-05-28T16:00:00Z",
+        stage: "completed",
+        planningId: "plan-4",
+
+        references: [
+            { type: "design", url: "https://figma.com/character-art", title: "角色美术设计稿" },
         ],
+        comments: [
+            { id: "com-20", authorId: "user-8", content: "全部角色美术资源已完成并通过审核", createdAt: "2026-05-28T15:00:00Z" },
+        ],
+    },
+    // 子任务: 主角立绘设计
+    {
+        id: "task-30",
+        itemType: "task",
+        parentRequirementId: "req-9",
+        title: "主角立绘设计",
+        description: "完成男女主角各4套服装的立绘设计",
+        status: "done",
+        priority: "high",
+        dueDate: "2026-05-10T00:00:00Z",
+        projectId: "proj-1",
+        assigneeId: "user-8",
+        createdAt: "2026-04-25T08:00:00Z",
+        updatedAt: "2026-05-10T16:00:00Z",
+        stage: "completed",
+        planningId: "plan-4",
+        references: [],
+        comments: [],
+    },
+    // 子任务: NPC模型制作
+    {
+        id: "task-31",
+        itemType: "task",
+        parentRequirementId: "req-9",
+        title: "NPC模型制作",
+        description: "完成20个主要NPC的3D模型和贴图",
+        status: "done",
+        priority: "high",
+        dueDate: "2026-05-20T00:00:00Z",
+        projectId: "proj-1",
+        assigneeId: "user-9",
+        createdAt: "2026-04-28T10:00:00Z",
+        updatedAt: "2026-05-20T18:00:00Z",
+        stage: "completed",
+        planningId: "plan-4",
+        references: [],
+        comments: [],
+    },
+    // 子任务: 角色动作动画
+    {
+        id: "task-32",
+        itemType: "task",
+        parentRequirementId: "req-9",
+        title: "角色动作动画",
+        description: "制作角色移动、攻击、待机等基础动画",
+        status: "done",
+        priority: "medium",
+        dueDate: "2026-05-25T00:00:00Z",
+        projectId: "proj-1",
+        assigneeId: "user-16",
+        createdAt: "2026-05-05T10:00:00Z",
+        updatedAt: "2026-05-25T17:00:00Z",
+        stage: "completed",
+        planningId: "plan-4",
+        references: [],
+        comments: [],
+    },
+
+    // 需求单: 场景美术资源
+    {
+        id: "req-10",
+        itemType: "requirement",
+        parentRequirementId: null,
+        title: "场景美术资源",
+        description: "完成游戏主城、野外、副本等场景的美术资源制作",
+        status: "done",
+        priority: "high",
+        dueDate: null,
+        projectId: "proj-1",
+        assigneeId: null,
+        createdAt: "2026-04-28T08:00:00Z",
+        updatedAt: "2026-05-28T18:00:00Z",
+        stage: "completed",
+        planningId: "plan-4",
+
+        references: [],
+        comments: [
+            { id: "com-21", authorId: "user-2", content: "场景美术资源全部验收通过", createdAt: "2026-05-28T17:00:00Z" },
+        ],
+    },
+    // 子任务: 主城场景建模
+    {
+        id: "task-33",
+        itemType: "task",
+        parentRequirementId: "req-10",
+        title: "主城场景建模",
+        description: "完成主城场景的3D建模、材质和灯光",
+        status: "done",
+        priority: "high",
+        dueDate: "2026-05-15T00:00:00Z",
+        projectId: "proj-1",
+        assigneeId: "user-9",
+        createdAt: "2026-04-28T08:00:00Z",
+        updatedAt: "2026-05-15T16:00:00Z",
+        stage: "completed",
+        planningId: "plan-4",
+        references: [],
+        comments: [],
+    },
+    // 子任务: 野外场景制作
+    {
+        id: "task-34",
+        itemType: "task",
+        parentRequirementId: "req-10",
+        title: "野外场景制作",
+        description: "完成森林、沙漠、雪地等3个野外场景",
+        status: "done",
+        priority: "medium",
+        dueDate: "2026-05-22T00:00:00Z",
+        projectId: "proj-1",
+        assigneeId: "user-8",
+        createdAt: "2026-05-02T10:00:00Z",
+        updatedAt: "2026-05-22T18:00:00Z",
+        stage: "completed",
+        planningId: "plan-4",
         references: [],
         comments: [],
     },
@@ -904,7 +1089,7 @@ const mockTasks: TaskSeed[] = [
         updatedAt: "2026-05-15T16:00:00Z",
         stage: "preliminary",
         planningId: "plan-5",
-        participants: [],
+
         references: [
             { type: "document", url: "https://docs.example.com/ue5-setup", title: "引擎配置指南" },
         ],
@@ -926,10 +1111,6 @@ const mockTasks: TaskSeed[] = [
         updatedAt: "2026-05-16T17:00:00Z",
         stage: "completed",
         planningId: "plan-5",
-        participants: [
-            { roleType: "devops", memberId: "user-14", startTime: "2026-05-04T00:00:00Z", endTime: "2026-05-16T12:00:00Z" },
-            { roleType: "pm", memberId: "user-6", startTime: "2026-05-04T00:00:00Z", endTime: "2026-05-10T12:00:00Z" },
-        ],
         references: [],
         comments: [],
     },
@@ -949,10 +1130,6 @@ const mockTasks: TaskSeed[] = [
         updatedAt: "2026-05-15T16:00:00Z",
         stage: "preliminary",
         planningId: "plan-5",
-        participants: [
-            { roleType: "server", memberId: "user-3", startTime: "2026-05-07T00:00:00Z", endTime: "2026-05-23T12:00:00Z" },
-            { roleType: "client", memberId: "user-13", startTime: "2026-05-11T00:00:00Z", endTime: "2026-05-23T12:00:00Z" },
-        ],
         references: [],
         comments: [
             { id: "com-3", authorId: "user-3", content: "网络同步方案已确定", createdAt: "2026-05-15T10:00:00Z" },
@@ -977,7 +1154,7 @@ const mockTasks: TaskSeed[] = [
         updatedAt: "2026-05-22T11:00:00Z",
         stage: "initial",
         planningId: "plan-6",
-        participants: [],
+
         references: [
             { type: "design", url: "https://figma.com/pbr-materials", title: "PBR材质规范" },
         ],
@@ -999,10 +1176,6 @@ const mockTasks: TaskSeed[] = [
         updatedAt: "2026-05-20T14:00:00Z",
         stage: "initial",
         planningId: "plan-6",
-        participants: [
-            { roleType: "artist", memberId: "user-8", startTime: "2026-05-06T00:00:00Z", endTime: "2026-05-28T12:00:00Z" },
-            { roleType: "artist", memberId: "user-9", startTime: "2026-05-06T00:00:00Z", endTime: "2026-05-20T12:00:00Z" },
-        ],
         references: [],
         comments: [],
     },
@@ -1022,10 +1195,6 @@ const mockTasks: TaskSeed[] = [
         updatedAt: "2026-05-22T11:00:00Z",
         stage: "preliminary",
         planningId: "plan-6",
-        participants: [
-            { roleType: "server", memberId: "user-12", startTime: "2026-05-18T00:00:00Z", endTime: "2026-05-30T12:00:00Z" },
-            { roleType: "artist", memberId: "user-9", startTime: "2026-05-15T00:00:00Z", endTime: "2026-05-30T12:00:00Z" },
-        ],
         references: [],
         comments: [],
     },
@@ -1045,12 +1214,55 @@ const mockTasks: TaskSeed[] = [
         updatedAt: "2026-05-20T14:00:00Z",
         stage: "filed",
         planningId: "plan-6",
-        participants: [
-            { roleType: "animator", memberId: "user-16", startTime: "2026-05-25T00:00:00Z", endTime: "2026-06-08T12:00:00Z" },
-            { roleType: "server", memberId: "user-12", startTime: "2026-05-28T00:00:00Z", endTime: "2026-06-08T12:00:00Z" },
-        ],
         references: [],
         comments: [],
+    },
+];
+
+const mockTaskProgressHistories: TaskProgressHistory[] = [
+    {
+        id: "progress-history-1",
+        taskId: "task-7",
+        phaseId: "task-7-phase-2",
+        phaseName: "Data Model",
+        assigneeId: "user-12",
+        operatorId: "user-3",
+        oldProgress: 20,
+        newProgress: 80,
+        createdAt: "2026-06-16T10:15:00Z",
+    },
+    {
+        id: "progress-history-2",
+        taskId: "task-6",
+        phaseId: "task-6-phase-3",
+        phaseName: "Server Dev",
+        assigneeId: "user-3",
+        operatorId: "user-3",
+        oldProgress: 20,
+        newProgress: 35,
+        createdAt: "2026-06-15T17:40:00Z",
+    },
+    {
+        id: "progress-history-3",
+        taskId: "task-8",
+        phaseId: "task-8-phase-1",
+        phaseName: "UI Draft",
+        assigneeId: "user-10",
+        operatorId: "user-10",
+        oldProgress: 15,
+        newProgress: 60,
+        createdAt: "2026-06-14T14:05:00Z",
+    },
+    {
+        id: "progress-history-4",
+        taskId: "task-7",
+        phaseId: "task-7-phase-1",
+        phaseName: "Plan Review",
+        assigneeId: "user-2",
+        operatorId: "user-2",
+        oldProgress: 70,
+        newProgress: 100,
+        createdAt: "2026-06-12T18:30:00Z",
     },
 ];
 
@@ -1060,6 +1272,7 @@ let plannings: Planning[] = [...mockPlannings];
 let tasks: Task[] = mockTasks.map(normalizeTask);
 let users: User[] = [...mockUsers];
 let taskHistories: TaskHistory[] = [];
+let taskProgressHistories: TaskProgressHistory[] = [...mockTaskProgressHistories];
 
 // Event handlers
 type MockEventHandler = (data: any) => void;
@@ -1241,6 +1454,22 @@ export const mockApi = {
         return history;
     },
 
+    getTaskProgressHistories: (taskId: string): TaskProgressHistory[] =>
+        taskProgressHistories.filter((h) => h.taskId === taskId).sort((a, b) =>
+            new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+        ),
+
+    addTaskProgressHistory: (entry: Omit<TaskProgressHistory, "id" | "createdAt">): TaskProgressHistory => {
+        const history: TaskProgressHistory = {
+            ...entry,
+            id: generateId(),
+            createdAt: new Date().toISOString(),
+        };
+        taskProgressHistories.push(history);
+        trigger("task:progress-history:add", history);
+        return history;
+    },
+
     // Events
     on: (type: string, handler: MockEventHandler): void => {
         if (!eventHandlers.has(type)) {
@@ -1268,6 +1497,7 @@ export const mockApi = {
         tasks = mockTasks.map(normalizeTask);
         users = [...mockUsers];
         taskHistories = [];
+        taskProgressHistories = [...mockTaskProgressHistories];
     },
 };
 

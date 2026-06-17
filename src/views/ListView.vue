@@ -2,11 +2,12 @@
 import { ref, computed, watchEffect } from 'vue'
 import { useRoute } from 'vue-router'
 import type { Task, TaskStatus, TaskStage, TaskPriority } from '@/types'
-import { useTaskStore, useProjectStore, useMemberStore, useUserStore } from '@/stores'
+import { useTaskStore, useProjectStore, useMemberStore, useUserStore, usePlanningStore } from '@/stores'
 import TaskModal from '@/components/task/TaskModal.vue'
 import TaskFilter from '@/components/task/TaskFilter.vue'
 import MemberAvatar from '@/components/member/MemberAvatar.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
+import { buildTaskScheduleExport, copyTextToClipboard } from '@/utils/taskScheduleExport'
 
 interface TaskFilters {
   status?: TaskStatus
@@ -34,6 +35,7 @@ const taskStore = useTaskStore()
 const projectStore = useProjectStore()
 const memberStore = useMemberStore()
 const userStore = useUserStore()
+const planningStore = usePlanningStore()
 
 const filters = ref<TaskFilters>({
   stage: undefined,
@@ -49,6 +51,7 @@ const selectedTask = ref<Task | null>(null)
 const showAbandoned = ref(false)
 const childParentRequirementId = ref<string | null>(null)
 const collapsedRequirementIds = ref<Set<string>>(new Set())
+const exportMessage = ref('')
 
 // 排序状态
 type SortField = 'title' | 'status' | 'stage' | 'priority' | 'assignee' | 'dueDate' | null
@@ -181,7 +184,7 @@ const filteredTasks = computed(() => {
 
   // 按负责人过滤
   if (assigneeId !== undefined && assigneeId !== null) {
-    tasks = tasks.filter(t => taskStore.isTaskItem(t) && t.assigneeId === assigneeId)
+    tasks = tasks.filter(t => taskStore.isTaskItem(t) && taskStore.isUserParticipating(t, assigneeId))
   }
 
   // 只显示自己参与的任务
@@ -312,6 +315,59 @@ function handleFilter(newFilters: TaskFilters) {
   filters.value = { ...filters.value, ...newFilters }
 }
 
+const exportPlanning = computed(() => {
+  return selectedPlanningId.value ? planningStore.getPlanningById(selectedPlanningId.value) : null
+})
+
+const exportPlanningTasks = computed(() => {
+  const planningId = selectedPlanningId.value
+  const projectId = projectStore.currentProjectId
+  if (!planningId) return []
+  return taskStore.tasks.filter(task => {
+    if (!taskStore.isTaskItem(task)) return false
+    if (projectId && task.projectId !== projectId) return false
+    if (task.planningId !== planningId) return false
+    if (!showAbandoned.value && task.status === 'abandoned') return false
+    return true
+  })
+})
+
+async function exportTaskSchedule() {
+  if (!exportPlanning.value) {
+    exportMessage.value = '请先选择迭代'
+    window.setTimeout(() => {
+      exportMessage.value = ''
+    }, 2000)
+    return
+  }
+
+  const content = buildTaskScheduleExport(exportPlanningTasks.value, {
+    allTasks: taskStore.tasks,
+    planningName: exportPlanning.value.name,
+    planningDeadline: exportPlanning.value.deadline,
+    getStageLabel: task => taskStore.getTaskStageLabel(task)
+  })
+
+  if (!content) {
+    exportMessage.value = '暂无可导出的任务'
+    window.setTimeout(() => {
+      exportMessage.value = ''
+    }, 2000)
+    return
+  }
+
+  try {
+    await copyTextToClipboard(content)
+    exportMessage.value = '已复制排期'
+  } catch {
+    exportMessage.value = '复制失败'
+  }
+
+  window.setTimeout(() => {
+    exportMessage.value = ''
+  }, 2000)
+}
+
 function isRequirementCollapsed(requirementId: string): boolean {
   return collapsedRequirementIds.value.has(requirementId)
 }
@@ -378,7 +434,6 @@ function handleSave(taskData: Partial<Task>) {
       phases: taskData.phases || [],
       currentPhaseId: taskData.currentPhaseId || null,
       planningId: taskData.planningId || null,
-      participants: taskData.participants || [],
       references: taskData.references || [],
       comments: taskData.comments || []
     })
@@ -446,6 +501,12 @@ function getRequirementProgressText(task: Task): string {
         <button class="btn btn-secondary btn-sm" :disabled="visibleRequirementIds.length === 0" @click="collapseAllRequirements">
           折叠全部
         </button>
+      </div>
+      <div class="export-toolbar">
+        <button class="btn btn-secondary" :disabled="!exportPlanning || exportPlanningTasks.length === 0" @click="exportTaskSchedule">
+          导出排期
+        </button>
+        <span v-if="exportMessage" class="export-message">{{ exportMessage }}</span>
       </div>
       <button class="btn btn-primary" @click="openNewTaskModal">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -597,6 +658,7 @@ function getRequirementProgressText(task: Task): string {
       :task="selectedTask"
       :project-id="projectStore.currentProjectId || ''"
       :initial-parent-requirement-id="childParentRequirementId"
+      :initial-planning-id="selectedPlanningId"
       @close="closeModal"
       @save="handleSave"
       @delete="handleDelete"
@@ -654,6 +716,19 @@ function getRequirementProgressText(task: Task): string {
   align-items: center;
   gap: 8px;
   margin-right: 16px;
+}
+
+.export-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-right: 16px;
+}
+
+.export-message {
+  color: var(--color-text-muted);
+  font-size: 12px;
+  white-space: nowrap;
 }
 
 .page-subtitle {
@@ -865,6 +940,10 @@ function getRequirementProgressText(task: Task): string {
   }
 
   .requirement-toolbar {
+    margin-right: 0;
+  }
+
+  .export-toolbar {
     margin-right: 0;
   }
 }

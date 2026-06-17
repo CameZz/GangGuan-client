@@ -36,7 +36,8 @@
       "Bash(openspec *)",
       "Bash(echo '--- *)",
       "Bash(ipconfig)",
-      "Bash(findstr \"IPv4\")"
+      "Bash(findstr \"IPv4\")",
+      "PowerShell(Move-Item *)"
     ]
   }
 }

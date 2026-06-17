@@ -2,11 +2,12 @@
 import { ref, computed, watchEffect } from 'vue'
 import { useRoute } from 'vue-router'
 import type { Task, TaskStage, TaskStatus, TaskPriority } from '@/types'
-import { useTaskStore, useProjectStore, useUserStore } from '@/stores'
+import { useTaskStore, useProjectStore, useUserStore, usePlanningStore } from '@/stores'
 import TaskCard from '@/components/task/TaskCard.vue'
 import TaskModal from '@/components/task/TaskModal.vue'
 import TaskFilter from '@/components/task/TaskFilter.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
+import { buildTaskScheduleExport, copyTextToClipboard } from '@/utils/taskScheduleExport'
 
 interface TaskFilters {
   status?: TaskStatus
@@ -33,6 +34,7 @@ const route = useRoute()
 const taskStore = useTaskStore()
 const projectStore = useProjectStore()
 const userStore = useUserStore()
+const planningStore = usePlanningStore()
 
 const filters = ref<TaskFilters>({
   stage: undefined,
@@ -48,6 +50,7 @@ const selectedTask = ref<Task | null>(null)
 const showAbandoned = ref(false)
 const childParentRequirementId = ref<string | null>(null)
 const collapsedRequirementIds = ref<Set<string>>(new Set())
+const exportMessage = ref('')
 
 // Sync projectId from route (only when it changes)
 watchEffect(() => {
@@ -115,7 +118,7 @@ function buildKanbanEntries(tasks: Task[]): KanbanEntry[] {
       group = {
         kind: 'requirement',
         requirement,
-        childTasks: getVisibleRequirementChildTasks(requirement.id)
+        childTasks: []
       }
       groups.set(requirement.id, group)
       orderedRequirementIds.push(requirement.id)
@@ -132,7 +135,7 @@ function buildKanbanEntries(tasks: Task[]): KanbanEntry[] {
     if (task.parentRequirementId) {
       const requirement = taskStore.tasks.find(t => t.id === task.parentRequirementId)
       if (requirement && taskStore.isRequirement(requirement)) {
-        ensureGroup(requirement)
+        ensureGroup(requirement).childTasks.push(task)
         continue
       }
     }
@@ -144,32 +147,6 @@ function buildKanbanEntries(tasks: Task[]): KanbanEntry[] {
     ...orderedRequirementIds.map(id => groups.get(id)!).filter(Boolean),
     ...standaloneTasks.map(task => ({ kind: 'task' as const, task }))
   ]
-}
-
-function getScopedVisibleTasks(): Task[] {
-  const projectId = projectStore.currentProjectId
-  const planningId = selectedPlanningId.value
-  let tasks = taskStore.tasks
-
-  if (projectId) {
-    tasks = tasks.filter(t => t.projectId === projectId)
-  }
-
-  if (planningId) {
-    tasks = tasks.filter(t => t.planningId === planningId)
-  }
-
-  if (!showAbandoned.value) {
-    tasks = tasks.filter(t => t.status !== 'abandoned')
-  }
-
-  return tasks
-}
-
-function getVisibleRequirementChildTasks(requirementId: string): Task[] {
-  return getScopedVisibleTasks().filter(task =>
-    taskStore.isTaskItem(task) && task.parentRequirementId === requirementId
-  )
 }
 
 const abandonedCount = computed(() => {
@@ -229,7 +206,7 @@ const filteredTasks = computed(() => {
 
   // 按负责人过滤
   if (assigneeId !== undefined && assigneeId !== null) {
-    tasks = tasks.filter(t => taskStore.isTaskItem(t) && t.assigneeId === assigneeId)
+    tasks = tasks.filter(t => taskStore.isTaskItem(t) && taskStore.isUserParticipating(t, assigneeId))
   }
 
   // 只显示自己参与的任务
@@ -253,6 +230,59 @@ const filteredTasks = computed(() => {
 
 function handleFilter(newFilters: TaskFilters) {
   filters.value = { ...filters.value, ...newFilters }
+}
+
+const exportPlanning = computed(() => {
+  return selectedPlanningId.value ? planningStore.getPlanningById(selectedPlanningId.value) : null
+})
+
+const exportPlanningTasks = computed(() => {
+  const planningId = selectedPlanningId.value
+  const projectId = projectStore.currentProjectId
+  if (!planningId) return []
+  return taskStore.tasks.filter(task => {
+    if (!taskStore.isTaskItem(task)) return false
+    if (projectId && task.projectId !== projectId) return false
+    if (task.planningId !== planningId) return false
+    if (!showAbandoned.value && task.status === 'abandoned') return false
+    return true
+  })
+})
+
+async function exportTaskSchedule() {
+  if (!exportPlanning.value) {
+    exportMessage.value = '请先选择迭代'
+    window.setTimeout(() => {
+      exportMessage.value = ''
+    }, 2000)
+    return
+  }
+
+  const content = buildTaskScheduleExport(exportPlanningTasks.value, {
+    allTasks: taskStore.tasks,
+    planningName: exportPlanning.value.name,
+    planningDeadline: exportPlanning.value.deadline,
+    getStageLabel: task => taskStore.getTaskStageLabel(task)
+  })
+
+  if (!content) {
+    exportMessage.value = '暂无可导出的任务'
+    window.setTimeout(() => {
+      exportMessage.value = ''
+    }, 2000)
+    return
+  }
+
+  try {
+    await copyTextToClipboard(content)
+    exportMessage.value = '已复制排期'
+  } catch {
+    exportMessage.value = '复制失败'
+  }
+
+  window.setTimeout(() => {
+    exportMessage.value = ''
+  }, 2000)
 }
 
 function isRequirementCollapsed(requirementId: string): boolean {
@@ -321,7 +351,6 @@ function handleSave(taskData: Partial<Task>) {
       phases: taskData.phases || [],
       currentPhaseId: taskData.currentPhaseId || null,
       planningId: taskData.planningId || null,
-      participants: taskData.participants || [],
       references: taskData.references || [],
       comments: taskData.comments || []
     })
@@ -370,6 +399,12 @@ function getRequirementProgressText(requirement: Task): string {
           折叠全部
         </button>
       </div>
+      <div class="export-toolbar">
+        <button class="btn btn-secondary" :disabled="!exportPlanning || exportPlanningTasks.length === 0" @click="exportTaskSchedule">
+          导出排期
+        </button>
+        <span v-if="exportMessage" class="export-message">{{ exportMessage }}</span>
+      </div>
       <button class="btn btn-primary" @click="openNewTaskModal">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <path d="M12 5v14M5 12h14" />
@@ -378,7 +413,7 @@ function getRequirementProgressText(requirement: Task): string {
       </button>
     </div>
 
-    <TaskFilter @filter="handleFilter" />
+    <TaskFilter :show-status-filter="false" @filter="handleFilter" />
 
     <div v-if="filteredTasks.length > 0" class="kanban-board" :class="{ 'show-abandoned': showAbandoned }">
       <div
@@ -462,6 +497,7 @@ function getRequirementProgressText(requirement: Task): string {
       :task="selectedTask"
       :project-id="projectStore.currentProjectId || ''"
       :initial-parent-requirement-id="childParentRequirementId"
+      :initial-planning-id="selectedPlanningId"
       @close="closeModal"
       @save="handleSave"
       @delete="handleDelete"
@@ -521,6 +557,19 @@ function getRequirementProgressText(requirement: Task): string {
   align-items: center;
   gap: 8px;
   margin-right: 16px;
+}
+
+.export-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-right: 16px;
+}
+
+.export-message {
+  color: var(--color-text-muted);
+  font-size: 12px;
+  white-space: nowrap;
 }
 
 .page-subtitle {
@@ -665,6 +714,10 @@ function getRequirementProgressText(requirement: Task): string {
   }
 
   .requirement-toolbar {
+    margin-right: 0;
+  }
+
+  .export-toolbar {
     margin-right: 0;
   }
 }

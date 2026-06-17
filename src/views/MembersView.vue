@@ -32,18 +32,17 @@ watchEffect(() => {
 const filteredUsers = computed(() => {
   let result = users.value
 
-  // Filter by planning if selected - get all participants from tasks in this planning
+  // Filter by planning if selected - get all phase assignees from tasks in this planning
   if (planningId.value) {
     const planningTasks = taskStore.tasks.filter(t => taskStore.isTaskItem(t) && t.planningId === planningId.value)
 
-    // Get all unique participant memberIds
-    const participantIds = planningTasks.flatMap(t => [
-      ...t.participants.map(p => p.memberId).filter(Boolean),
+    // Get all unique assignee memberIds from task phases
+    const assigneeIds = planningTasks.flatMap(t => [
       ...t.phases.map(phase => phase.assigneeId).filter(Boolean)
     ])
-    const uniqueParticipantIds = [...new Set(participantIds)] as string[]
+    const uniqueAssigneeIds = [...new Set(assigneeIds)] as string[]
 
-    result = result.filter(u => uniqueParticipantIds.includes(u.id))
+    result = result.filter(u => uniqueAssigneeIds.includes(u.id))
   }
 
   // Filter by role if selected

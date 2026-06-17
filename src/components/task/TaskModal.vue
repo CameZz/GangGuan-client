@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, watch, computed } from 'vue'
-import type { Task, TaskStatus, TaskPriority, TaskStage, TaskPhase, Participant, Reference, Comment, RoleType, TaskHistory, TaskItemType } from '@/types'
+import type { Task, TaskStatus, TaskPriority, TaskStage, TaskPhase, Reference, Comment, RoleType, TaskHistory, TaskProgressHistory, TaskItemType } from '@/types'
 import { HISTORY_FIELD_LABELS, ROLES } from '@/types'
 import { useMemberStore, usePlanningStore, useProjectStore, useTaskStore, useUserStore } from '@/stores'
 import { createTaskPhaseFromTemplate, getPhaseStatus, getTaskPhaseProgress, getTaskStageLabel, normalizeTaskPhases } from '@/utils/taskPhases'
@@ -11,6 +11,7 @@ const props = defineProps<{
   isOpen: boolean
   projectId?: string
   initialParentRequirementId?: string | null
+  initialPlanningId?: string | null
 }>()
 
 const emit = defineEmits<{
@@ -42,17 +43,16 @@ const form = ref({
   phases: [] as TaskPhase[],
   currentPhaseId: null as string | null,
   planningId: null as string | null,
-  participants: [] as Participant[],
   references: [] as Reference[],
   comments: [] as Comment[],
   projectId: ''
 })
 
-const activeTab = ref<'main' | 'participants' | 'children' | 'references' | 'comments' | 'history'>('main')
+const activeTab = ref<'main' | 'phases' | 'progressHistory' | 'children' | 'references' | 'comments' | 'history'>('main')
 const deleteError = ref('')
 const phaseTemplateToAdd = ref('')
 
-watch([() => props.isOpen, () => props.task, () => props.initialParentRequirementId], ([open]) => {
+watch([() => props.isOpen, () => props.task, () => props.initialParentRequirementId, () => props.initialPlanningId], ([open]) => {
   if (open && props.task) {
     loadHistories()
     form.value = {
@@ -68,12 +68,13 @@ watch([() => props.isOpen, () => props.task, () => props.initialParentRequiremen
       phases: normalizeTaskPhases(props.task.phases),
       currentPhaseId: props.task.currentPhaseId || null,
       planningId: props.task.planningId || null,
-      participants: [...(props.task.participants || [])],
       references: [...(props.task.references || [])],
       comments: [...(props.task.comments || [])],
       projectId: props.task.projectId
     }
   } else if (open) {
+    taskHistories.value = []
+    progressHistories.value = []
     const parentRequirement = props.initialParentRequirementId
       ? taskStore.tasks.find(t => t.id === props.initialParentRequirementId)
       : null
@@ -91,11 +92,7 @@ watch([() => props.isOpen, () => props.task, () => props.initialParentRequiremen
       stage: 'filed',
       phases,
       currentPhaseId: null,
-      planningId: null,
-      participants: [
-        { roleType: 'pm', memberId: '', startTime: null, endTime: null },
-        { roleType: 'tester', memberId: '', startTime: null, endTime: null }
-      ],
+      planningId: props.initialPlanningId || null,
       references: [],
       comments: [],
       projectId
@@ -114,9 +111,10 @@ const isTaskItem = computed(() => form.value.itemType !== 'requirement')
 const isChildTaskCreation = computed(() => !!props.initialParentRequirementId && !props.task)
 
 const requirementOptions = computed(() => {
-  if (!form.value.projectId) return []
+  if (!form.value.projectId || !form.value.planningId) return []
   return taskStore.getRequirementsByProject(form.value.projectId)
     .filter(requirement => requirement.id !== props.task?.id)
+    .filter(requirement => requirement.planningId === form.value.planningId)
 })
 
 const childTasks = computed(() => {
@@ -176,7 +174,6 @@ function handleSubmit() {
         dueDate: null,
         assigneeId: null,
         stage: 'filed',
-        participants: [],
         phases: [],
         currentPhaseId: null
       }
@@ -206,39 +203,13 @@ function handleItemTypeChange(itemType: TaskItemType) {
     form.value.parentRequirementId = null
     form.value.assigneeId = null
     form.value.dueDate = ''
-    form.value.participants = []
     form.value.phases = []
     form.value.currentPhaseId = null
-  } else if (form.value.participants.length === 0) {
-    form.value.participants = [
-      { roleType: 'pm', memberId: '', startTime: null, endTime: null },
-      { roleType: 'tester', memberId: '', startTime: null, endTime: null }
-    ]
+  } else {
     if (form.value.phases.length === 0) {
       form.value.phases = taskStore.buildTaskPhasesFromTemplates(form.value.projectId)
     }
   }
-}
-
-function addParticipant() {
-  form.value.participants.push({
-    roleType: 'planner',
-    memberId: '',
-    startTime: null,
-    endTime: null
-  })
-}
-
-function removeParticipant(index: number) {
-  form.value.participants.splice(index, 1)
-}
-
-function updateParticipantRole(index: number, roleType: RoleType) {
-  form.value.participants[index].roleType = roleType
-}
-
-function updateParticipantMember(index: number, memberId: string) {
-  form.value.participants[index].memberId = memberId
 }
 
 function addReference() {
@@ -275,10 +246,15 @@ function getMemberName(memberId: string): string {
 }
 
 const taskHistories = ref<TaskHistory[]>([])
+const progressHistories = ref<TaskProgressHistory[]>([])
 
 function loadHistories() {
   if (props.task?.id) {
     taskHistories.value = taskStore.getTaskHistories(props.task.id)
+    progressHistories.value = taskStore.getTaskProgressHistories(props.task.id)
+  } else {
+    taskHistories.value = []
+    progressHistories.value = []
   }
 }
 
@@ -310,6 +286,14 @@ function updateTaskPhaseAssignee(index: number, assigneeId: string) {
   form.value.phases[index].assigneeId = assigneeId || null
 }
 
+function updateTaskPhaseStartTime(index: number, dateStr: string) {
+  form.value.phases[index].startTime = dateStr ? new Date(dateStr).toISOString() : null
+}
+
+function updateTaskPhaseEndTime(index: number, dateStr: string) {
+  form.value.phases[index].endTime = dateStr ? new Date(dateStr).toISOString() : null
+}
+
 function updateTaskPhaseProgress(index: number, progress: number) {
   const value = Math.min(100, Math.max(0, Math.round(progress)))
   form.value.phases[index].progress = value
@@ -338,13 +322,37 @@ function getStatusLabel(status: TaskStatus): string {
   }
   return labels[status]
 }
+
+function getProgressDelta(history: TaskProgressHistory): string {
+  const delta = history.newProgress - history.oldProgress
+  return `${delta > 0 ? '+' : ''}${delta}%`
+}
 </script>
 
 <template>
   <div v-if="isOpen" class="modal-overlay" @click.self="emit('close')">
     <div class="modal modal-lg">
       <div class="modal-header">
-        <h2 class="modal-title">{{ isEditing ? (isRequirementItem ? '编辑需求单' : '编辑任务单') : '新建单据' }}</h2>
+        <div class="modal-title-row">
+          <h2 class="modal-title">{{ isEditing ? (isRequirementItem ? '编辑需求单' : '编辑任务单') : '新建单据' }}</h2>
+          <div v-if="!isEditing" class="type-selector type-selector--header">
+            <button
+              class="type-option"
+              :class="{ active: form.itemType === 'requirement' }"
+              :disabled="isChildTaskCreation"
+              @click="handleItemTypeChange('requirement')"
+            >
+              需求单
+            </button>
+            <button
+              class="type-option"
+              :class="{ active: form.itemType === 'task' }"
+              @click="handleItemTypeChange('task')"
+            >
+              任务单
+            </button>
+          </div>
+        </div>
         <button class="btn btn-ghost" @click="emit('close')">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M18 6L6 18M6 6l12 12" />
@@ -367,9 +375,15 @@ function getStatusLabel(status: TaskStatus): string {
         <button
           v-if="isTaskItem"
           class="tab"
-          :class="{ active: activeTab === 'participants' }"
-          @click="activeTab = 'participants'"
+          :class="{ active: activeTab === 'phases' }"
+          @click="activeTab = 'phases'"
         >阶段进度 ({{ form.phases.length }})</button>
+        <button
+          v-if="isEditing && isTaskItem"
+          class="tab"
+          :class="{ active: activeTab === 'progressHistory' }"
+          @click="activeTab = 'progressHistory'"
+        >进度历史 ({{ progressHistories.length }})</button>
         <button
           class="tab"
           :class="{ active: activeTab === 'references' }"
@@ -390,26 +404,6 @@ function getStatusLabel(status: TaskStatus): string {
 
       <div class="modal-body">
         <div v-show="activeTab === 'main'">
-          <div v-if="!isEditing" class="form-group">
-            <label class="label">单据类型</label>
-            <div class="type-selector">
-              <button
-                class="type-option"
-                :class="{ active: form.itemType === 'requirement' }"
-                :disabled="isChildTaskCreation"
-                @click="handleItemTypeChange('requirement')"
-              >
-                需求单
-              </button>
-              <button
-                class="type-option"
-                :class="{ active: form.itemType === 'task' }"
-                @click="handleItemTypeChange('task')"
-              >
-                任务单
-              </button>
-            </div>
-          </div>
           <div class="form-group">
             <label class="label">标题</label>
             <input
@@ -427,7 +421,7 @@ function getStatusLabel(status: TaskStatus): string {
               placeholder="输入任务描述"
             ></textarea>
           </div>
-          <div class="form-row">
+          <div class="form-row task-meta-row" :class="{ 'task-meta-row--task': isTaskItem }">
             <div v-if="isTaskItem" class="form-group">
               <label class="label">状态</label>
               <select v-model="form.status" class="input select">
@@ -445,22 +439,22 @@ function getStatusLabel(status: TaskStatus): string {
                 <option value="high">高</option>
               </select>
             </div>
+            <div v-if="isTaskItem" class="form-group">
+              <label class="label">所属需求</label>
+              <select v-model="form.parentRequirementId" class="input select">
+                <option :value="null">不归属需求单</option>
+                <option v-for="requirement in requirementOptions" :key="requirement.id" :value="requirement.id">
+                  {{ requirement.title }}
+                </option>
+              </select>
+            </div>
           </div>
-          <div class="form-group">
+          <div v-if="isEditing" class="form-group">
             <label class="label">规划</label>
             <select v-model="form.planningId" class="input select">
               <option :value="null">无规划</option>
               <option v-for="planning in plannings" :key="planning.id" :value="planning.id">
                 {{ planning.name }}
-              </option>
-            </select>
-          </div>
-          <div v-if="isTaskItem && requirementOptions.length > 0" class="form-group">
-            <label class="label">所属需求</label>
-            <select v-model="form.parentRequirementId" class="input select">
-              <option :value="null">不归属需求单</option>
-              <option v-for="requirement in requirementOptions" :key="requirement.id" :value="requirement.id">
-                {{ requirement.title }}
               </option>
             </select>
           </div>
@@ -501,10 +495,56 @@ function getStatusLabel(status: TaskStatus): string {
                       {{ member.name }}
                     </option>
                   </select>
+                  <div class="phase-time-range">
+                    <input
+                      type="date"
+                      class="input"
+                      :value="phase.startTime ? phase.startTime.split('T')[0] : ''"
+                      @change="updateTaskPhaseStartTime(index, ($event.target as HTMLInputElement).value)"
+                      placeholder="开始时间"
+                    />
+                    <span class="time-separator">至</span>
+                    <input
+                      type="date"
+                      class="input"
+                      :value="phase.endTime ? phase.endTime.split('T')[0] : ''"
+                      @change="updateTaskPhaseEndTime(index, ($event.target as HTMLInputElement).value)"
+                      placeholder="结束时间"
+                    />
+                  </div>
                   <div class="phase-row-actions">
-                    <button class="btn btn-ghost btn-sm" :disabled="index === 0" @click="moveTaskPhase(index, 'up')">上移</button>
-                    <button class="btn btn-ghost btn-sm" :disabled="index === form.phases.length - 1" @click="moveTaskPhase(index, 'down')">下移</button>
-                    <button class="btn btn-ghost btn-sm" @click="removeTaskPhase(index)">删除</button>
+                    <button
+                      class="btn btn-ghost phase-icon-button"
+                      :disabled="index === 0"
+                      title="上移"
+                      aria-label="上移阶段"
+                      @click="moveTaskPhase(index, 'up')"
+                    >
+                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M12 19V5M5 12l7-7 7 7" />
+                      </svg>
+                    </button>
+                    <button
+                      class="btn btn-ghost phase-icon-button"
+                      :disabled="index === form.phases.length - 1"
+                      title="下移"
+                      aria-label="下移阶段"
+                      @click="moveTaskPhase(index, 'down')"
+                    >
+                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M12 5v14M19 12l-7 7-7-7" />
+                      </svg>
+                    </button>
+                    <button
+                      class="btn btn-ghost phase-icon-button danger"
+                      title="删除"
+                      aria-label="删除阶段"
+                      @click="removeTaskPhase(index)"
+                    >
+                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14" />
+                      </svg>
+                    </button>
                   </div>
                 </div>
                 <div v-if="form.phases.length === 0" class="phase-empty">暂无阶段</div>
@@ -548,7 +588,7 @@ function getStatusLabel(status: TaskStatus): string {
           </button>
         </div>
 
-        <div v-show="activeTab === 'participants' && isTaskItem" class="tab-content">
+        <div v-show="activeTab === 'phases' && isTaskItem" class="tab-content">
           <div class="phase-progress-list">
             <div
               v-for="(phase, index) in form.phases"
@@ -575,64 +615,39 @@ function getStatusLabel(status: TaskStatus): string {
                   :disabled="!canEditPhaseProgress(phase)"
                   @input="updateTaskPhaseProgress(index, Number(($event.target as HTMLInputElement).value))"
                 />
-                <div class="phase-progress-bar">
-                  <div class="phase-progress-fill" :style="{ width: `${phase.progress}%` }"></div>
-                </div>
               </div>
             </div>
             <div v-if="form.phases.length === 0" class="phase-empty">暂无阶段进度</div>
           </div>
-          <div class="section-divider"></div>
-          <div class="participant-list">
+        </div>
+
+        <div v-show="activeTab === 'progressHistory' && isTaskItem" class="tab-content">
+          <div v-if="progressHistories.length === 0" class="history-empty">暂无进度修改记录</div>
+          <div v-else class="progress-history-list">
             <div
-              v-for="(participant, index) in form.participants"
-              :key="index"
-              class="participant-item"
+              v-for="history in progressHistories"
+              :key="history.id"
+              class="progress-history-item"
             >
-              <div class="participant-row">
-                <select
-                  :value="participant.roleType"
-                  class="input select"
-                  @change="updateParticipantRole(index, ($event.target as HTMLSelectElement).value as RoleType)"
-                >
-                  <option v-for="role in ROLES" :key="role.type" :value="role.type">
-                    {{ role.name }}
-                  </option>
-                </select>
-                <select
-                  :value="participant.memberId"
-                  class="input select"
-                  @change="updateParticipantMember(index, ($event.target as HTMLSelectElement).value)"
-                >
-                  <option value="">选择成员</option>
-                  <option v-for="member in availableMembers" :key="member.id" :value="member.id">
-                    {{ member.name }}
-                  </option>
-                </select>
-                <button class="btn btn-ghost btn-sm" @click="removeParticipant(index)">
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <path d="M18 6L6 18M6 6l12 12" />
-                  </svg>
-                </button>
-              </div>
-              <div class="participant-times">
-                <input
-                  type="date"
-                  class="input"
-                  :value="participant.startTime ? participant.startTime.split('T')[0] : ''"
-                  @change="participant.startTime = ($event.target as HTMLInputElement).value ? new Date(($event.target as HTMLInputElement).value).toISOString() : null"
-                />
-                <span>至</span>
-                <input
-                  type="date"
-                  class="input"
-                  :value="participant.endTime ? participant.endTime.split('T')[0] : ''"
-                  @change="participant.endTime = ($event.target as HTMLInputElement).value ? new Date(($event.target as HTMLInputElement).value).toISOString() : null"
-                />
+              <div class="progress-history-row">
+                <span class="progress-history-operator">{{ getMemberName(history.operatorId) }}</span>
+                <span class="progress-history-body">
+                  <span class="progress-history-phase">{{ history.phaseName }}</span>
+                  <span class="progress-history-label">进度</span>
+                  <span class="progress-history-old">{{ history.oldProgress }}%</span>
+                  <span class="progress-history-arrow">→</span>
+                  <span class="progress-history-new">{{ history.newProgress }}%</span>
+                  <span
+                    class="progress-history-delta"
+                    :class="{ negative: history.newProgress < history.oldProgress }"
+                  >
+                    {{ getProgressDelta(history) }}
+                  </span>
+                </span>
+                <span class="progress-history-time">{{ new Date(history.createdAt).toLocaleString('zh-CN') }}</span>
               </div>
             </div>
           </div>
-          <button class="btn btn-secondary" @click="addParticipant">添加参与者</button>
         </div>
 
         <div v-show="activeTab === 'references'" class="tab-content">
@@ -731,7 +746,7 @@ function getStatusLabel(status: TaskStatus): string {
 
 <style scoped>
 .modal-lg {
-  max-width: 800px;
+  max-width: 960px;
   max-height: 90vh;
   display: flex;
   flex-direction: column;
@@ -768,6 +783,13 @@ function getStatusLabel(status: TaskStatus): string {
   padding: 16px 0;
 }
 
+.modal-title-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-width: 0;
+}
+
 .type-selector {
   display: inline-flex;
   gap: 4px;
@@ -776,9 +798,13 @@ function getStatusLabel(status: TaskStatus): string {
   border-radius: var(--radius-md);
 }
 
+.type-selector--header {
+  flex-shrink: 0;
+}
+
 .type-option {
-  min-width: 96px;
-  padding: 8px 14px;
+  min-width: 72px;
+  padding: 6px 12px;
   border: none;
   border-radius: var(--radius-sm);
   background: transparent;
@@ -803,6 +829,14 @@ function getStatusLabel(status: TaskStatus): string {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 16px;
+}
+
+.task-meta-row--task {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 2fr);
+}
+
+.task-meta-row .form-group {
+  min-width: 0;
 }
 
 .phase-plan {
@@ -841,7 +875,7 @@ function getStatusLabel(status: TaskStatus): string {
 
 .phase-plan-row {
   display: grid;
-  grid-template-columns: 32px 1fr minmax(160px, 220px) auto;
+  grid-template-columns: 30px minmax(120px, 1fr) 132px 230px 92px;
   align-items: center;
   gap: 8px;
   padding: 8px;
@@ -864,17 +898,25 @@ function getStatusLabel(status: TaskStatus): string {
 }
 
 .phase-main {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
   min-width: 0;
 }
 
 .phase-title {
+  min-width: 0;
   font-size: 13px;
   font-weight: 600;
   color: var(--color-text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .phase-progress-text {
-  margin-top: 2px;
+  flex-shrink: 0;
   font-size: 12px;
   color: var(--color-text-muted);
 }
@@ -882,10 +924,51 @@ function getStatusLabel(status: TaskStatus): string {
 .phase-row-actions {
   display: flex;
   gap: 4px;
+  justify-content: flex-end;
+  white-space: nowrap;
 }
 
 .phase-assignee-select {
+  width: 132px;
+  min-width: 0;
+  padding-left: 8px;
+  padding-right: 24px;
+}
+
+.phase-time-range {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 16px minmax(0, 1fr);
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.phase-time-range .input {
   width: 100%;
+  min-width: 0;
+  padding-left: 8px;
+  padding-right: 8px;
+  font-size: 12px;
+}
+
+.time-separator {
+  color: var(--color-text-muted);
+  font-size: 12px;
+  text-align: center;
+}
+
+.phase-icon-button {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-sm);
+}
+
+.phase-icon-button.danger {
+  color: var(--color-danger);
 }
 
 .phase-empty {
@@ -896,6 +979,75 @@ function getStatusLabel(status: TaskStatus): string {
   border-radius: var(--radius-sm);
   background-color: var(--color-bg-primary);
   font-size: 13px;
+}
+
+@media (max-width: 920px) {
+  .task-meta-row--task {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .task-meta-row--task .form-group:last-child {
+    grid-column: 1 / 3;
+  }
+
+  .phase-plan-row {
+    grid-template-columns: 30px minmax(0, 1fr) 132px 92px;
+  }
+
+  .phase-time-range {
+    grid-column: 2 / 5;
+  }
+}
+
+@media (max-width: 640px) {
+  .modal-title-row {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .task-meta-row,
+  .task-meta-row--task {
+    grid-template-columns: 1fr;
+  }
+
+  .task-meta-row--task .form-group:last-child {
+    grid-column: auto;
+  }
+
+  .phase-plan-row {
+    grid-template-columns: 30px minmax(0, 1fr) 92px;
+  }
+
+  .phase-assignee-select,
+  .phase-time-range {
+    grid-column: 2 / 4;
+    width: 100%;
+  }
+
+  .phase-row-actions {
+    grid-column: 3;
+    grid-row: 1;
+  }
+
+  .progress-history-row {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .progress-history-operator {
+    flex-basis: auto;
+    max-width: 100%;
+  }
+
+  .progress-history-time {
+    align-self: flex-end;
+  }
+
+  .progress-history-phase {
+    max-width: 100%;
+  }
 }
 
 .readonly-field {
@@ -946,38 +1098,19 @@ function getStatusLabel(status: TaskStatus): string {
 }
 
 .phase-progress-control {
-  display: grid;
-  grid-template-columns: 160px 1fr;
-  gap: 10px;
+  display: flex;
   align-items: center;
 }
 
 .phase-progress-control input[type="range"] {
   width: 100%;
   accent-color: var(--color-primary);
+  cursor: pointer;
 }
 
 .phase-progress-control input[type="range"]:disabled {
   opacity: 0.45;
-}
-
-.phase-progress-bar {
-  height: 8px;
-  overflow: hidden;
-  border-radius: var(--radius-full);
-  background-color: var(--color-bg-primary);
-}
-
-.phase-progress-fill {
-  height: 100%;
-  border-radius: inherit;
-  background-color: var(--color-primary);
-}
-
-.section-divider {
-  height: 1px;
-  margin: 16px 0;
-  background-color: var(--color-border);
+  cursor: not-allowed;
 }
 
 .member-selector {
@@ -1056,45 +1189,12 @@ function getStatusLabel(status: TaskStatus): string {
   font-size: 14px;
 }
 
-.participant-list,
 .reference-list,
 .comment-list {
   display: flex;
   flex-direction: column;
   gap: 12px;
   margin-bottom: 16px;
-}
-
-.participant-item {
-  padding: 12px;
-  background-color: var(--color-bg-tertiary);
-  border-radius: var(--radius-md);
-}
-
-.participant-row {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-}
-
-.participant-row .select {
-  flex: 1;
-}
-
-.participant-times {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  margin-top: 8px;
-}
-
-.participant-times .input {
-  flex: 1;
-}
-
-.participant-times span {
-  color: var(--color-text-secondary);
-  font-size: 14px;
 }
 
 .reference-item {
@@ -1241,6 +1341,111 @@ function getStatusLabel(status: TaskStatus): string {
   font-size: 12px;
   color: var(--color-text-muted);
   margin-top: 4px;
+}
+
+.progress-history-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.progress-history-item {
+  padding: 10px 12px;
+  border: 1px solid var(--color-border);
+  border-left: 4px solid var(--color-primary);
+  border-radius: var(--radius-md);
+  background-color: var(--color-bg-tertiary);
+}
+
+.progress-history-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  min-width: 0;
+}
+
+.progress-history-operator {
+  flex: 0 0 96px;
+  min-width: 0;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--color-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.progress-history-time {
+  flex: 0 0 auto;
+  font-size: 12px;
+  color: var(--color-text-muted);
+  white-space: nowrap;
+}
+
+.progress-history-body {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1 1 auto;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.progress-history-phase {
+  max-width: min(220px, 45%);
+  padding: 4px 8px;
+  border-radius: var(--radius-sm);
+  background-color: var(--color-bg-primary);
+  color: var(--color-text-primary);
+  font-size: 13px;
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.progress-history-label {
+  font-size: 12px;
+  color: var(--color-text-muted);
+}
+
+.progress-history-old,
+.progress-history-new {
+  min-width: 48px;
+  padding: 4px 8px;
+  border-radius: var(--radius-sm);
+  text-align: center;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.progress-history-old {
+  background-color: #fee2e2;
+  color: #b91c1c;
+}
+
+.progress-history-new {
+  background-color: #dcfce7;
+  color: #15803d;
+}
+
+.progress-history-arrow {
+  color: var(--color-text-muted);
+}
+
+.progress-history-delta {
+  padding: 3px 8px;
+  border-radius: 999px;
+  background-color: #dcfce7;
+  color: #15803d;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.progress-history-delta.negative {
+  background-color: #fee2e2;
+  color: #b91c1c;
 }
 
 .child-task-list {
