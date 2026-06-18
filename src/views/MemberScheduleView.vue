@@ -4,6 +4,16 @@ import { useRoute } from 'vue-router'
 import { useTaskStore, useProjectStore, useMemberStore, usePlanningStore, useUserStore } from '@/stores'
 import { ROLES } from '@/types'
 import type { RoleType, Task, TaskPhase, TaskProgressHistory } from '@/types'
+import {
+  formatDateKey as formatScheduleDateKey,
+  formatDateLabel,
+  formatWorkingDuration,
+  generateWorkSlots,
+  getEffectiveWorkingMinutes,
+  getWorkSlotGridRange,
+  isWorkday as isScheduleWorkday,
+  WORK_SLOTS_PER_DAY
+} from '@/utils/workingSchedule'
 
 const route = useRoute()
 const taskStore = useTaskStore()
@@ -17,7 +27,7 @@ const members = computed(() => memberStore.members)
 const plannings = computed(() => planningStore.plannings)
 const projects = computed(() => projectStore.projects)
 
-const GRID_SLOT_WIDTH = 50
+const GRID_SLOT_WIDTH = 12.5
 const MEMBER_INFO_WIDTH = 180
 const MEMBER_INFO_PADDING_X = 16
 const MEMBER_INFO_TOTAL_WIDTH = MEMBER_INFO_WIDTH + MEMBER_INFO_PADDING_X * 2 + 1
@@ -62,10 +72,7 @@ const yearOptions = computed(() => {
 const monthOptions = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
 
 const formatDateKey = (date: Date): string => {
-  const y = date.getFullYear()
-  const m = String(date.getMonth() + 1).padStart(2, '0')
-  const d = String(date.getDate()).padStart(2, '0')
-  return `${y}-${m}-${d}`
+  return formatScheduleDateKey(date)
 }
 
 // Timeline range from selected year/month
@@ -95,7 +102,7 @@ const daySlots = computed<DaySlot[]>(() => {
   while (current <= endDate) {
     days.push({
       date: new Date(current),
-      dateStr: `${current.getMonth() + 1}/${current.getDate()}（${'日一二三四五六'[current.getDay()]}）`,
+      dateStr: formatDateLabel(current),
       dayIndex
     })
     current.setDate(current.getDate() + 1)
@@ -194,6 +201,7 @@ const memberScheduleData = computed(() => {
     if (currentProjectId.value && task.projectId !== currentProjectId.value) continue
     for (const phase of task.phases) {
       if (!phase.assigneeId || !phase.startTime) continue
+      if (!getWorkSlotGridRange(phase.startTime, phase.endTime, workSlots.value)) continue
       const taskStart = new Date(phase.startTime).getTime()
       const taskEnd = phase.endTime ? new Date(phase.endTime).getTime() : taskStart + 24 * 60 * 60 * 1000
       if (taskEnd < rangeStart || taskStart >= rangeEnd) continue
@@ -370,60 +378,12 @@ const selectProgressCell = (cell: ProgressCell | null) => {
   selectedProgressCell.value = cell
 }
 
-// Slot index calculation
-const getSlotIndex = (timestamp: string): number => {
-  const date = new Date(timestamp)
-  const start = timelineStart.value
-  const startOfDay = new Date(start.getFullYear(), start.getMonth(), start.getDate()).getTime()
-  const currentDay = new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime()
-  const daysDiff = Math.floor((currentDay - startOfDay) / (24 * 60 * 60 * 1000))
-  const hourOfDay = date.getHours()
-  const slotInDay = Math.floor(hourOfDay / 12)
-  return daysDiff * 2 + slotInDay
-}
-
-// Clamp to nearest visible day
-const clampToVisible = (dayIndex: number, direction: 'forward' | 'backward'): number | undefined => {
-  const map = dayIndexToVisibleCol.value!
-  if (map.has(dayIndex)) return map.get(dayIndex)
-  const totalDays = daySlots.value.length
-  if (direction === 'forward') {
-    for (let d = dayIndex + 1; d < totalDays; d++) {
-      if (map.has(d)) return map.get(d)
-    }
-  } else {
-    for (let d = dayIndex - 1; d >= 0; d--) {
-      if (map.has(d)) return map.get(d)
-    }
-  }
-  return undefined
-}
-
 // Bar style for a task phase
 const getBarStyle = (item: MemberTaskItem) => {
-  const startTime = item.phase.startTime
-  const endTime = item.phase.endTime
-  if (!startTime) return { display: 'none' }
-
-  const startSlot = getSlotIndex(startTime)
-  const endSlot = endTime ? getSlotIndex(endTime) + 1 : startSlot + 1
-
-  if (dayIndexToVisibleCol.value) {
-    const startDay = Math.floor(startSlot / 2)
-    const startHalf = startSlot % 2
-    const endDay = Math.floor((endSlot - 1) / 2)
-    const endHalf = (endSlot - 1) % 2
-    const visStartDay = clampToVisible(startDay, 'forward')
-    const visEndDay = clampToVisible(endDay, 'backward')
-    if (visStartDay === undefined || visEndDay === undefined) return { display: 'none' }
-    return {
-      gridColumn: `${visStartDay * 2 + startHalf + 1} / ${visEndDay * 2 + endHalf + 2}`,
-      gridRow: `${item.rowIndex + 1}`
-    }
-  }
-
+  const range = getWorkSlotGridRange(item.phase.startTime, item.phase.endTime, workSlots.value)
+  if (!range) return { display: 'none' }
   return {
-    gridColumn: `${startSlot + 1} / ${endSlot + 1}`,
+    gridColumn: `${range.start} / ${range.end}`,
     gridRow: `${item.rowIndex + 1}`
   }
 }
@@ -431,26 +391,43 @@ const getBarStyle = (item: MemberTaskItem) => {
 // Overlap detection: check if two time ranges overlap
 const rangesOverlap = (a: { start: string | null, end: string | null }, b: { start: string | null, end: string | null }): boolean => {
   if (!a.start || !b.start) return false
-  const aStart = new Date(a.start).getTime()
-  const aEnd = a.end ? new Date(a.end).getTime() : aStart + 12 * 60 * 60 * 1000
-  const bStart = new Date(b.start).getTime()
-  const bEnd = b.end ? new Date(b.end).getTime() : bStart + 12 * 60 * 60 * 1000
-  return aStart < bEnd && bStart < aEnd
+  const aStart = new Date(a.start)
+  const aEnd = a.end ? new Date(a.end) : new Date(aStart.getTime() + 30 * 60 * 1000)
+  const bStart = new Date(b.start)
+  const bEnd = b.end ? new Date(b.end) : new Date(bStart.getTime() + 30 * 60 * 1000)
+  const overlapStart = new Date(Math.max(aStart.getTime(), bStart.getTime()))
+  const overlapEnd = new Date(Math.min(aEnd.getTime(), bEnd.getTime()))
+  return getEffectiveWorkingMinutes(overlapStart, overlapEnd, workdayConfig.value) > 0
 }
 
 // Tooltip
 const tooltipVisible = ref(false)
 const tooltipX = ref(0)
 const tooltipY = ref(0)
-const tooltipData = ref<{ taskName: string, planningName: string, stage: string, priority: string } | null>(null)
+const tooltipData = ref<{ taskName: string, planningName: string, stage: string, priority: string, timeRange: string, duration: string } | null>(null)
 
 const priorityLabels: Record<string, string> = { low: '低', medium: '中', high: '高' }
+const formatPhaseDateTime = (value: string | null): string => {
+  if (!value) return '-'
+  return new Date(value).toLocaleString('zh-CN', {
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit'
+  })
+}
+
 const showTooltip = (e: MouseEvent, item: MemberTaskItem) => {
+  const duration = item.phase.startTime && item.phase.endTime
+    ? getEffectiveWorkingMinutes(new Date(item.phase.startTime), new Date(item.phase.endTime), workdayConfig.value)
+    : 0
   tooltipData.value = {
     taskName: item.task.title,
     planningName: getPlanningName(item.task.planningId, item.task.projectId),
     stage: taskStore.getTaskStageLabel(item.task),
-    priority: priorityLabels[item.task.priority] || item.task.priority
+    priority: priorityLabels[item.task.priority] || item.task.priority,
+    timeRange: `${formatPhaseDateTime(item.phase.startTime)} - ${formatPhaseDateTime(item.phase.endTime)}`,
+    duration: formatWorkingDuration(duration)
   }
   tooltipX.value = e.clientX + 12
   tooltipY.value = e.clientY - 8
@@ -477,13 +454,13 @@ const getRoleName = (role: RoleType): string => roleNames[role] || role
 // Workday logic
 const canEditWorkday = computed(() => userStore.isAdmin || userStore.currentUser?.role === 'pm')
 
+const workdayConfig = computed(() => ({
+  nonWorkdays: projectStore.currentProject?.nonWorkdays || [],
+  extraWorkdays: projectStore.currentProject?.extraWorkdays || []
+}))
+
 const isWorkday = (date: Date): boolean => {
-  const key = formatDateKey(date)
-  const project = projectStore.currentProject
-  if (project?.nonWorkdays?.includes(key)) return false
-  if (project?.extraWorkdays?.includes(key)) return true
-  const day = date.getDay()
-  return day >= 1 && day <= 5
+  return isScheduleWorkday(date, workdayConfig.value)
 }
 
 const toggleWorkday = async (date: Date) => {
@@ -524,7 +501,13 @@ const visibleDaySlots = computed(() => {
   return daySlots.value.filter(day => isWorkday(day.date))
 })
 
-const visibleTotalSlots = computed(() => visibleDaySlots.value.length * 2)
+const visibleWorkDays = computed(() => visibleDaySlots.value.filter(day => isWorkday(day.date)))
+
+const workSlots = computed(() => generateWorkSlots(visibleDaySlots.value, workdayConfig.value, {
+  includeRestDays: !collapseRestDays.value
+}))
+
+const visibleTotalSlots = computed(() => visibleDaySlots.value.length * WORK_SLOTS_PER_DAY)
 
 const dayIndexToVisibleCol = computed(() => {
   if (!collapseRestDays.value) return null
@@ -549,10 +532,10 @@ const scrollScheduleToToday = (): boolean => {
   const scrollBody = scheduleScrollBody.value
   if (!scrollBody) return false
 
-  const todayVisibleIndex = visibleDaySlots.value.findIndex(day => formatDateKey(day.date) === todayKey)
+  const todayVisibleIndex = visibleWorkDays.value.findIndex(day => formatDateKey(day.date) === todayKey)
   if (todayVisibleIndex < 0) return false
 
-  const dayWidth = GRID_SLOT_WIDTH * 2
+  const dayWidth = GRID_SLOT_WIDTH * WORK_SLOTS_PER_DAY
   const gridViewportWidth = Math.max(scrollBody.clientWidth - MEMBER_INFO_TOTAL_WIDTH, 0)
   const todayCenter = todayVisibleIndex * dayWidth + dayWidth / 2
   scrollBody.scrollLeft = Math.max(0, todayCenter - gridViewportWidth / 2)
@@ -576,17 +559,12 @@ const activePlannings = computed(() => {
   const seen = new Set<string>()
   const result: Array<{ id: string, name: string, projectId: string }> = []
   const visibleProgressTaskIds = new Set(monthProgressHistories.value.map(history => history.taskId))
-  const rangeStart = timelineStart.value.getTime()
-  const rangeEnd = timelineEnd.value.getTime() + 24 * 60 * 60 * 1000
 
   for (const task of allTasks.value) {
     if (currentProjectId.value && task.projectId !== currentProjectId.value) continue
     if (!task.planningId) continue
     const hasVisibleSchedule = task.phases.some(phase => {
-      if (!phase.startTime) return false
-      const taskStart = new Date(phase.startTime).getTime()
-      const taskEnd = phase.endTime ? new Date(phase.endTime).getTime() : taskStart + 24 * 60 * 60 * 1000
-      return taskEnd >= rangeStart && taskStart < rangeEnd
+      return getWorkSlotGridRange(phase.startTime, phase.endTime, workSlots.value) !== null
     })
     if (!hasVisibleSchedule && !visibleProgressTaskIds.has(task.id)) continue
     const key = `${task.projectId}:${task.planningId}`
@@ -668,11 +646,11 @@ const activePlannings = computed(() => {
                 minWidth: visibleGridWidth
               }"
             >
-              <template v-for="(day, vi) in visibleDaySlots" :key="day.dayIndex">
+              <template v-for="(day, di) in visibleDaySlots" :key="day.dayIndex">
                 <div
                   class="date-label"
                   :class="{ 'non-workday': !isWorkday(day.date), 'can-edit': canEditWorkday }"
-                  :style="{ gridColumn: `${vi * 2 + 1} / ${vi * 2 + 3}` }"
+                  :style="{ gridColumn: `${di * WORK_SLOTS_PER_DAY + 1} / ${(di + 1) * WORK_SLOTS_PER_DAY + 1}` }"
                   @click="canEditWorkday ? toggleWorkday(day.date) : undefined"
                 >
                   {{ day.dateStr }}
@@ -699,11 +677,11 @@ const activePlannings = computed(() => {
             <div class="member-grid" :style="{ gridTemplateColumns: `repeat(${visibleTotalSlots}, ${GRID_SLOT_WIDTH}px)`, minWidth: visibleGridWidth }">
               <!-- Grid cells -->
               <div
-                v-for="(day, vi) in visibleDaySlots"
+                v-for="(day, di) in visibleDaySlots"
                 :key="day.dayIndex"
                 class="grid-cell day-start"
                 :class="{ 'non-workday-cell': !isWorkday(day.date) }"
-                :style="{ gridColumn: `${vi * 2 + 1} / ${vi * 2 + 3}` }"
+                :style="{ gridColumn: `${di * WORK_SLOTS_PER_DAY + 1} / ${(di + 1) * WORK_SLOTS_PER_DAY + 1}` }"
               ></div>
 
               <!-- Task bars -->
@@ -742,15 +720,15 @@ const activePlannings = computed(() => {
             <div
               class="schedule-grid-header"
               :style="{
-                gridTemplateColumns: `repeat(${visibleTotalSlots}, ${GRID_SLOT_WIDTH}px)`,
-                minWidth: visibleGridWidth
+                gridTemplateColumns: `repeat(${visibleDaySlots.length}, ${GRID_SLOT_WIDTH * 2}px)`,
+                minWidth: progressGridWidth
               }"
             >
               <template v-for="(day, vi) in visibleDaySlots" :key="day.dayIndex">
                 <div
                   class="date-label"
                   :class="{ 'non-workday': !isWorkday(day.date), 'can-edit': canEditWorkday }"
-                  :style="{ gridColumn: `${vi * 2 + 1} / ${vi * 2 + 3}` }"
+                  :style="{ gridColumn: `${vi + 1} / ${vi + 2}` }"
                   @click="canEditWorkday ? toggleWorkday(day.date) : undefined"
                 >
                   {{ day.dateStr }}
@@ -853,6 +831,8 @@ const activePlannings = computed(() => {
         <div class="tooltip-title">{{ tooltipData.taskName }}</div>
         <div class="tooltip-row">迭代：{{ tooltipData.planningName }}</div>
         <div class="tooltip-row">阶段：{{ tooltipData.stage }}</div>
+        <div class="tooltip-row">时间：{{ tooltipData.timeRange }}</div>
+        <div class="tooltip-row">有效工时：{{ tooltipData.duration }}</div>
         <div class="tooltip-row">优先级：{{ tooltipData.priority }}</div>
       </div>
     </Teleport>
@@ -1091,12 +1071,20 @@ const activePlannings = computed(() => {
 /* Date labels */
 .date-label {
   text-align: center;
-  padding: 12px 0;
+  padding: 8px 4px;
   font-size: 12px;
   font-weight: 500;
   color: var(--color-text-secondary);
   border-right: 2px solid var(--color-border);
   position: relative;
+}
+
+.work-time-label {
+  display: block;
+  margin-top: 2px;
+  font-size: 10px;
+  font-weight: 400;
+  color: var(--color-text-muted);
 }
 
 .date-label.non-workday {

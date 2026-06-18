@@ -19,6 +19,8 @@ const project = computed(() => {
 
 const isProjectModalOpen = ref(false)
 const newPhaseName = ref('')
+const draggedPhaseId = ref<string | null>(null)
+const dragOverPhaseId = ref<string | null>(null)
 const canManageProject = computed(() => userStore.isProjectManager)
 
 const phaseTemplates = computed(() => {
@@ -94,6 +96,57 @@ async function movePhaseTemplate(templateId: string, direction: 'up' | 'down') {
   if (!canManageProject.value) return
   if (!project.value) return
   await projectStore.movePhaseTemplate(project.value.id, templateId, direction)
+}
+
+function handlePhaseDragStart(event: DragEvent, templateId: string) {
+  if (!canManageProject.value) return
+  draggedPhaseId.value = templateId
+  event.dataTransfer?.setData('text/plain', templateId)
+  if (event.dataTransfer) {
+    event.dataTransfer.effectAllowed = 'move'
+  }
+}
+
+function handlePhaseDragOver(event: DragEvent, templateId: string) {
+  if (!canManageProject.value || !draggedPhaseId.value || draggedPhaseId.value === templateId) return
+  event.preventDefault()
+  dragOverPhaseId.value = templateId
+  if (event.dataTransfer) {
+    event.dataTransfer.dropEffect = 'move'
+  }
+}
+
+function handlePhaseDragLeave(templateId: string) {
+  if (dragOverPhaseId.value === templateId) {
+    dragOverPhaseId.value = null
+  }
+}
+
+async function handlePhaseDrop(event: DragEvent, targetTemplateId: string) {
+  event.preventDefault()
+  if (!canManageProject.value || !project.value) return
+
+  const sourceTemplateId = draggedPhaseId.value || event.dataTransfer?.getData('text/plain')
+  draggedPhaseId.value = null
+  dragOverPhaseId.value = null
+
+  if (!sourceTemplateId || sourceTemplateId === targetTemplateId) return
+
+  const templates = [...phaseTemplates.value]
+  const sourceIndex = templates.findIndex(template => template.id === sourceTemplateId)
+  const targetIndex = templates.findIndex(template => template.id === targetTemplateId)
+
+  if (sourceIndex < 0 || targetIndex < 0) return
+
+  const [movedTemplate] = templates.splice(sourceIndex, 1)
+  templates.splice(targetIndex, 0, movedTemplate)
+
+  await projectStore.reorderPhaseTemplates(project.value.id, templates.map(template => template.id))
+}
+
+function handlePhaseDragEnd() {
+  draggedPhaseId.value = null
+  dragOverPhaseId.value = null
 }
 
 function goToKanban() {
@@ -173,9 +226,24 @@ function goToList() {
               v-for="(template, index) in phaseTemplates"
               :key="template.id"
               class="phase-template-row"
-              :class="{ disabled: !template.enabled, readonly: !canManageProject }"
+              :class="{
+                disabled: !template.enabled,
+                readonly: !canManageProject,
+                dragging: draggedPhaseId === template.id,
+                'drag-over': dragOverPhaseId === template.id && draggedPhaseId !== template.id
+              }"
+              @dragover="handlePhaseDragOver($event, template.id)"
+              @dragleave="handlePhaseDragLeave(template.id)"
+              @drop="handlePhaseDrop($event, template.id)"
             >
-              <div class="phase-order">{{ index + 1 }}</div>
+              <div
+                class="phase-order"
+                :class="{ draggable: canManageProject }"
+                :draggable="canManageProject"
+                :title="canManageProject ? '拖动调整顺序' : undefined"
+                @dragstart="handlePhaseDragStart($event, template.id)"
+                @dragend="handlePhaseDragEnd"
+              >{{ index + 1 }}</div>
               <input
                 v-if="canManageProject"
                 :value="template.name"
@@ -390,6 +458,7 @@ function goToList() {
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
   background-color: var(--color-bg-primary);
+  transition: border-color var(--transition-fast), background-color var(--transition-fast), opacity var(--transition-fast);
 }
 
 .phase-template-row.readonly {
@@ -398,6 +467,15 @@ function goToList() {
 
 .phase-template-row.disabled {
   opacity: 0.62;
+}
+
+.phase-template-row.dragging {
+  opacity: 0.45;
+}
+
+.phase-template-row.drag-over {
+  border-color: var(--color-primary);
+  background-color: var(--color-bg-secondary);
 }
 
 .phase-order {
@@ -411,6 +489,15 @@ function goToList() {
   color: var(--color-text-secondary);
   font-size: 12px;
   font-weight: 600;
+  user-select: none;
+}
+
+.phase-order.draggable {
+  cursor: grab;
+}
+
+.phase-order.draggable:active {
+  cursor: grabbing;
 }
 
 .phase-name-input {

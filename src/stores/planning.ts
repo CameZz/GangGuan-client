@@ -76,7 +76,9 @@ export const usePlanningStore = defineStore('planning', () => {
 
   async function deletePlanning(id: string): Promise<boolean> {
     try {
-      await planningApi.delete(id)
+      const existing = plannings.value.find(p => p.id === id)
+      if (!existing?.projectId) return false
+      await planningApi.delete(existing.projectId, id)
       plannings.value = plannings.value.filter(p => p.id !== id)
       return true
     } catch (error) {

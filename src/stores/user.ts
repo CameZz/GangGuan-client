@@ -137,6 +137,20 @@ export const useUserStore = defineStore('user', () => {
     }
   }
 
+  wsService.on('user:update', (user: User) => {
+    if (currentUser.value?.id === user.id) {
+      currentUser.value = user
+    }
+  })
+
+  wsService.on('user:delete', ({ id }: { id: string }) => {
+    if (currentUser.value?.id === id) {
+      wsService.disconnect()
+      currentUser.value = null
+      hasInitialized.value = true
+    }
+  })
+
   return {
     currentUser,
     isLoading,

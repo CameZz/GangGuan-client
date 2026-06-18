@@ -4,6 +4,7 @@ import type { Task, TaskStatus, TaskPriority, TaskStage, TaskPhase, Reference, C
 import { HISTORY_FIELD_LABELS, ROLES } from '@/types'
 import { useMemberStore, usePlanningStore, useProjectStore, useTaskStore, useUserStore } from '@/stores'
 import { createTaskPhaseFromTemplate, getPhaseStatus, getTaskPhaseProgress, getTaskStageLabel, normalizeTaskPhases } from '@/utils/taskPhases'
+import { localDateTimeInputToIso, normalizePhaseDateTime, toLocalDateTimeInputValue, validatePhaseTimeRange } from '@/utils/workingSchedule'
 import MemberAvatar from '@/components/member/MemberAvatar.vue'
 
 const props = defineProps<{
@@ -50,7 +51,10 @@ const form = ref({
 
 const activeTab = ref<'main' | 'phases' | 'progressHistory' | 'children' | 'references' | 'comments' | 'history'>('main')
 const deleteError = ref('')
+const scheduleError = ref('')
 const phaseTemplateToAdd = ref('')
+const editingCommentIndex = ref<number | null>(null)
+const newCommentContent = ref('')
 
 watch([() => props.isOpen, () => props.task, () => props.initialParentRequirementId, () => props.initialPlanningId], ([open]) => {
   if (open && props.task) {
@@ -101,7 +105,10 @@ watch([() => props.isOpen, () => props.task, () => props.initialParentRequiremen
   if (open) {
     activeTab.value = 'main'
     deleteError.value = ''
+    scheduleError.value = ''
     phaseTemplateToAdd.value = ''
+    editingCommentIndex.value = null
+    newCommentContent.value = ''
   }
 })
 
@@ -143,6 +150,14 @@ const availablePhaseTemplates = computed(() => {
   return phaseTemplates.value.filter(template => !selectedTemplateIds.has(template.id))
 })
 
+const scheduleConfig = computed(() => {
+  const project = projectStore.projects.find(project => project.id === form.value.projectId)
+  return {
+    nonWorkdays: project?.nonWorkdays || [],
+    extraWorkdays: project?.extraWorkdays || []
+  }
+})
+
 const phaseProgress = computed(() => getTaskPhaseProgress(form.value.phases))
 
 const currentPhaseLabel = computed(() => getTaskStageLabel({
@@ -162,9 +177,40 @@ const currentDisplayAssignee = computed(() => {
   return currentDisplayPhase.value ? getPhaseAssignee(currentDisplayPhase.value) : null
 })
 
+function snapIsoToHalfHour(isoValue: string | null): string | null {
+  if (!isoValue) return null
+  const d = new Date(isoValue)
+  if (isNaN(d.getTime())) return isoValue
+  const datePart = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+  const timePart = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+  const snapped = snapToHalfHour(`${datePart}T${timePart}`)
+  return new Date(snapped).toISOString()
+}
+
 function handleSubmit() {
   // 服务端会在创建任务时自动生成阶段
-  const phases = normalizeTaskPhases(form.value.phases)
+  scheduleError.value = ''
+  // 先将表单中的阶段时间 snap 到合法时间点
+  for (const phase of form.value.phases) {
+    phase.startTime = snapIsoToHalfHour(phase.startTime)
+    phase.endTime = snapIsoToHalfHour(phase.endTime)
+  }
+  const phases = normalizeTaskPhases(form.value.phases).map(phase => ({
+    ...phase,
+    startTime: normalizePhaseDateTime(phase.startTime, 'start')?.toISOString() || null,
+    endTime: normalizePhaseDateTime(phase.endTime, 'end')?.toISOString() || null
+  }))
+  if (isTaskItem.value) {
+    for (const phase of phases) {
+      const error = validatePhaseTimeRange(phase.startTime, phase.endTime, scheduleConfig.value)
+      if (error) {
+        scheduleError.value = `${phase.name}: ${error}`
+        activeTab.value = 'phases'
+        return
+      }
+    }
+  }
+
   const taskData: Partial<Task> = isRequirementItem.value
     ? {
         ...form.value,
@@ -187,6 +233,7 @@ function handleSubmit() {
 
 function handleDelete() {
   deleteError.value = ''
+  scheduleError.value = ''
   if (deleteBlockedReason.value) {
     deleteError.value = deleteBlockedReason.value
     return
@@ -221,19 +268,35 @@ function removeReference(index: number) {
 }
 
 function addComment() {
+  const content = newCommentContent.value.trim()
+  if (!content) return
   const authorId = userStore.currentUser?.id || members.value[0]?.id
   if (authorId) {
     form.value.comments.push({
       id: Date.now().toString(),
       authorId,
-      content: '',
+      content,
       createdAt: new Date().toISOString()
     })
+    newCommentContent.value = ''
   }
 }
 
 function removeComment(index: number) {
   form.value.comments.splice(index, 1)
+  if (editingCommentIndex.value === index) {
+    editingCommentIndex.value = null
+  } else if (editingCommentIndex.value !== null && editingCommentIndex.value > index) {
+    editingCommentIndex.value--
+  }
+}
+
+function startEditComment(index: number) {
+  editingCommentIndex.value = index
+}
+
+function stopEditComment() {
+  editingCommentIndex.value = null
 }
 
 function getMemberName(memberId: string): string {
@@ -282,12 +345,62 @@ function updateTaskPhaseAssignee(index: number, assigneeId: string) {
   form.value.phases[index].assigneeId = assigneeId || null
 }
 
-function updateTaskPhaseStartTime(index: number, dateStr: string) {
-  form.value.phases[index].startTime = dateStr ? new Date(dateStr).toISOString() : null
+function snapToHalfHour(dateTimeValue: string): string {
+  if (!dateTimeValue) return dateTimeValue
+  const [datePart, timePart] = dateTimeValue.split('T')
+  if (!timePart) return dateTimeValue
+  let [h, m] = timePart.split(':').map(Number)
+  const totalMin = h * 60 + m
+  const lowerBound = 9 * 60 + 30   // 09:30
+  const upperBound = 18 * 60 + 30  // 18:30
+  const lunchStart = 12 * 60 + 30  // 12:30
+  const lunchEnd = 14 * 60         // 14:00
+  let snapped: number
+  if (totalMin <= lowerBound) {
+    snapped = lowerBound
+  } else if (totalMin >= upperBound) {
+    snapped = upperBound
+  } else if (totalMin > lunchStart && totalMin < lunchEnd) {
+    // 午休时间段内，吸附到更近的端点
+    snapped = (totalMin - lunchStart) <= (lunchEnd - totalMin) ? lunchStart : lunchEnd
+  } else {
+    snapped = Math.round(totalMin / 30) * 30
+  }
+  const sh = String(Math.floor(snapped / 60)).padStart(2, '0')
+  const sm = String(snapped % 60).padStart(2, '0')
+  return `${datePart}T${sh}:${sm}`
 }
 
-function updateTaskPhaseEndTime(index: number, dateStr: string) {
-  form.value.phases[index].endTime = dateStr ? new Date(dateStr).toISOString() : null
+function updateTaskPhaseStartTime(index: number, dateTimeValue: string) {
+  form.value.phases[index].startTime = localDateTimeInputToIso(snapToHalfHour(dateTimeValue))
+}
+
+function updateTaskPhaseEndTime(index: number, dateTimeValue: string) {
+  form.value.phases[index].endTime = localDateTimeInputToIso(snapToHalfHour(dateTimeValue))
+}
+
+function handlePhaseStartFocus(index: number, e: FocusEvent) {
+  const input = e.target as HTMLInputElement
+  if (!input.value) {
+    const today = new Date()
+    const y = today.getFullYear()
+    const m = String(today.getMonth() + 1).padStart(2, '0')
+    const d = String(today.getDate()).padStart(2, '0')
+    input.value = `${y}-${m}-${d}T09:30`
+    updateTaskPhaseStartTime(index, input.value)
+  }
+}
+
+function handlePhaseEndFocus(index: number, e: FocusEvent) {
+  const input = e.target as HTMLInputElement
+  if (!input.value) {
+    const today = new Date()
+    const y = today.getFullYear()
+    const m = String(today.getMonth() + 1).padStart(2, '0')
+    const d = String(today.getDate()).padStart(2, '0')
+    input.value = `${y}-${m}-${d}T18:30`
+    updateTaskPhaseEndTime(index, input.value)
+  }
 }
 
 function updateTaskPhaseProgress(index: number, progress: number) {
@@ -493,17 +606,21 @@ function getProgressDelta(history: TaskProgressHistory): string {
                   </select>
                   <div class="phase-time-range">
                     <input
-                      type="date"
+                      type="datetime-local"
+                      step="1800"
                       class="input"
-                      :value="phase.startTime ? phase.startTime.split('T')[0] : ''"
+                      :value="toLocalDateTimeInputValue(phase.startTime, 'start')"
+                      @focus="handlePhaseStartFocus(index, $event)"
                       @change="updateTaskPhaseStartTime(index, ($event.target as HTMLInputElement).value)"
                       placeholder="开始时间"
                     />
                     <span class="time-separator">至</span>
                     <input
-                      type="date"
+                      type="datetime-local"
+                      step="1800"
                       class="input"
-                      :value="phase.endTime ? phase.endTime.split('T')[0] : ''"
+                      :value="toLocalDateTimeInputValue(phase.endTime, 'end')"
+                      @focus="handlePhaseEndFocus(index, $event)"
                       @change="updateTaskPhaseEndTime(index, ($event.target as HTMLInputElement).value)"
                       placeholder="结束时间"
                     />
@@ -688,19 +805,50 @@ function getProgressDelta(history: TaskProgressHistory): string {
               :key="comment.id"
               class="comment-item"
             >
-              <div class="comment-header">
-                <span class="comment-author">{{ getMemberName(comment.authorId) }}</span>
-                <span class="comment-date">{{ new Date(comment.createdAt).toLocaleDateString() }}</span>
-              </div>
-              <textarea
-                v-model="comment.content"
-                class="input textarea"
-                placeholder="输入评论内容"
-              ></textarea>
-              <button class="btn btn-ghost btn-sm" @click="removeComment(index)">删除</button>
+              <template v-if="editingCommentIndex === index">
+                <div class="comment-line1">
+                  <span class="comment-author">{{ getMemberName(comment.authorId) }}：</span>
+                  <textarea
+                    ref="commentEditTextarea"
+                    v-model="comment.content"
+                    class="input textarea comment-edit-textarea"
+                    placeholder="输入评论内容"
+                  ></textarea>
+                </div>
+                <div class="comment-line2">
+                  <span></span>
+                  <div class="comment-actions">
+                    <button class="btn btn-ghost btn-sm" @click="stopEditComment">完成</button>
+                    <span class="comment-date">{{ new Date(comment.createdAt).toLocaleString('zh-CN') }}</span>
+                  </div>
+                </div>
+              </template>
+              <template v-else>
+                <div class="comment-line1">
+                  <span class="comment-author">{{ getMemberName(comment.authorId) }}：</span>
+                  <span class="comment-content">{{ comment.content || '暂无内容' }}</span>
+                </div>
+                <div class="comment-line2">
+                  <span></span>
+                  <div class="comment-actions">
+                    <button class="btn btn-ghost btn-sm comment-action-btn" @click="removeComment(index)">删除</button>
+                    <button class="btn btn-ghost btn-sm comment-action-btn" @click="startEditComment(index)">编辑</button>
+                    <span class="comment-date">{{ new Date(comment.createdAt).toLocaleString('zh-CN') }}</span>
+                  </div>
+                </div>
+              </template>
             </div>
           </div>
-          <button class="btn btn-secondary" @click="addComment">添加评论</button>
+          <div class="comment-add-row">
+            <input
+              v-model="newCommentContent"
+              type="text"
+              class="input"
+              placeholder="输入评论内容"
+              @keyup.enter="addComment"
+            />
+            <button class="btn btn-primary btn-sm" :disabled="!newCommentContent.trim()" @click="addComment">添加</button>
+          </div>
         </div>
 
         <div v-show="activeTab === 'history'" class="tab-content">
@@ -730,7 +878,7 @@ function getProgressDelta(history: TaskProgressHistory): string {
       </div>
 
       <div class="modal-footer">
-        <div v-if="deleteError" class="delete-error">{{ deleteError }}</div>
+        <div v-if="deleteError || scheduleError" class="delete-error">{{ deleteError || scheduleError }}</div>
         <button v-if="isEditing" class="btn btn-danger" :disabled="!!deleteBlockedReason" @click="handleDelete">删除</button>
         <div class="spacer"></div>
         <button class="btn btn-secondary" @click="emit('close')">取消</button>
@@ -879,7 +1027,7 @@ function getProgressDelta(history: TaskProgressHistory): string {
 
 .phase-plan-row {
   display: grid;
-  grid-template-columns: 30px minmax(120px, 1fr) 132px 230px 92px;
+  grid-template-columns: 30px minmax(120px, 1fr) 132px minmax(290px, 340px) 92px;
   align-items: center;
   gap: 8px;
   padding: 8px;
@@ -1193,12 +1341,18 @@ function getProgressDelta(history: TaskProgressHistory): string {
   font-size: 14px;
 }
 
-.reference-list,
-.comment-list {
+.reference-list {
   display: flex;
   flex-direction: column;
   gap: 12px;
   margin-bottom: 16px;
+}
+
+.comment-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 12px;
 }
 
 .reference-item {
@@ -1216,25 +1370,68 @@ function getProgressDelta(history: TaskProgressHistory): string {
 }
 
 .comment-item {
-  padding: 12px;
+  padding: 8px 10px;
   background-color: var(--color-bg-tertiary);
   border-radius: var(--radius-md);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
 
-.comment-header {
+.comment-line1 {
   display: flex;
-  justify-content: space-between;
-  margin-bottom: 8px;
+  align-items: baseline;
+  gap: 4px;
+  font-size: 13px;
+  line-height: 1.5;
 }
 
 .comment-author {
-  font-weight: 500;
-  font-size: 14px;
+  font-weight: 600;
+  flex-shrink: 0;
+  color: var(--color-text-primary);
+  white-space: nowrap;
+}
+
+.comment-content {
+  color: var(--color-text-primary);
+  word-break: break-word;
+}
+
+.comment-edit-textarea {
+  flex: 1;
+  min-height: 48px;
+}
+
+.comment-line2 {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.comment-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.comment-action-btn {
+  font-size: 12px;
+  padding: 2px 6px;
 }
 
 .comment-date {
   font-size: 12px;
   color: var(--color-text-muted);
+}
+
+.comment-add-row {
+  display: flex;
+  gap: 8px;
+}
+
+.comment-add-row .input {
+  flex: 1;
 }
 
 .spacer {

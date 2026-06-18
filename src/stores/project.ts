@@ -162,6 +162,36 @@ export const useProjectStore = defineStore('project', () => {
     }
   }
 
+  async function reorderPhaseTemplates(projectId: string, templateIds: string[]): Promise<boolean> {
+    const project = projects.value.find(p => p.id === projectId)
+    if (!project) return false
+
+    const knownIds = new Set(project.phaseTemplates.map(template => template.id))
+    if (templateIds.length !== project.phaseTemplates.length || templateIds.some(id => !knownIds.has(id))) {
+      return false
+    }
+
+    try {
+      const data = unwrapApiData<{ templates: ProjectPhaseTemplate[] }>(
+        await projectApi.reorderPhaseTemplates(projectId, templateIds) as any
+      )
+
+      if (data?.templates) {
+        upsertProject({
+          ...project,
+          phaseTemplates: data.templates
+        })
+      } else {
+        await init()
+      }
+
+      return true
+    } catch (error) {
+      console.error('閲嶆帓闃舵妯℃澘澶辫触:', error)
+      return false
+    }
+  }
+
   async function movePhaseTemplate(projectId: string, templateId: string, direction: 'up' | 'down'): Promise<boolean> {
     const project = projects.value.find(p => p.id === projectId)
     if (!project) return false
@@ -236,6 +266,7 @@ export const useProjectStore = defineStore('project', () => {
     getEnabledPhaseTemplates,
     addPhaseTemplate,
     updatePhaseTemplate,
+    reorderPhaseTemplates,
     movePhaseTemplate
   }
 })
