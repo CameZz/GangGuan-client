@@ -1,9 +1,9 @@
 <script setup lang="ts">
-import { ref, computed, nextTick, watchEffect } from 'vue'
+import { ref, computed, nextTick, watchEffect, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { useTaskStore, useProjectStore, useMemberStore, usePlanningStore, useUserStore } from '@/stores'
 import { ROLES } from '@/types'
-import type { RoleType, Task, TaskPhase } from '@/types'
+import type { RoleType, Task, TaskPhase, TaskProgressHistory } from '@/types'
 
 const route = useRoute()
 const taskStore = useTaskStore()
@@ -115,11 +115,24 @@ const taskById = computed(() => {
   return map
 })
 
+const progressHistoriesData = ref<TaskProgressHistory[]>([])
+
+// 加载进度历史数据
+async function loadProgressHistories() {
+  if (!currentProjectId.value) {
+    progressHistoriesData.value = []
+    return
+  }
+  progressHistoriesData.value = await taskStore.getProjectTaskProgressHistories(currentProjectId.value)
+}
+
+// 当项目ID变化时重新加载
+watch(currentProjectId, loadProgressHistories, { immediate: true })
+
 const monthProgressHistories = computed(() => {
-  if (!currentProjectId.value) return []
   const rangeStart = timelineStart.value.getTime()
   const rangeEnd = timelineEnd.value.getTime() + 24 * 60 * 60 * 1000
-  return taskStore.getProjectTaskProgressHistories(currentProjectId.value).filter(history => {
+  return progressHistoriesData.value.filter(history => {
     const changedAt = new Date(history.createdAt).getTime()
     return changedAt >= rangeStart && changedAt < rangeEnd
   })
@@ -473,7 +486,7 @@ const isWorkday = (date: Date): boolean => {
   return day >= 1 && day <= 5
 }
 
-const toggleWorkday = (date: Date) => {
+const toggleWorkday = async (date: Date) => {
   const project = projectStore.currentProject
   if (!project) return
 
@@ -500,7 +513,7 @@ const toggleWorkday = (date: Date) => {
     }
   }
 
-  projectStore.updateProject(project.id, { nonWorkdays, extraWorkdays })
+  await projectStore.updateProject(project.id, { nonWorkdays, extraWorkdays })
 }
 
 // Collapse rest days

@@ -3,67 +3,138 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import type { User } from '@/types'
-import mockApi from '@/utils/mock'
+import { unwrapApiData } from '@/api'
+import { authApi } from '@/api/auth'
+import { userApi } from '@/api/users'
+import { wsService } from '@/utils/websocket'
+
+type UserCreateInput = Omit<User, 'id'> & { password: string }
+type UserUpdateInput = Partial<Omit<User, 'id'>> & { password?: string }
 
 export const useUserStore = defineStore('user', () => {
   const currentUser = ref<User | null>(null)
   const isLoading = ref(false)
+  const hasInitialized = ref(false)
+  let initPromise: Promise<void> | null = null
 
   const isLoggedIn = computed(() => !!currentUser.value)
   const isAdmin = computed(() => currentUser.value?.isAdmin ?? false)
   const isProjectManager = computed(() => isAdmin.value || currentUser.value?.role === 'pm')
 
-  function init() {
-    isLoading.value = true
-    const savedUser = localStorage.getItem('currentUser')
-    if (savedUser) {
+  async function init(force = false): Promise<void> {
+    if (hasInitialized.value && !force) return
+    if (initPromise && !force) return initPromise
+
+    initPromise = (async () => {
+      isLoading.value = true
       try {
-        currentUser.value = JSON.parse(savedUser)
+        const data = unwrapApiData<{ user: User }>(await authApi.me() as any)
+        currentUser.value = data?.user || null
       } catch {
-        localStorage.removeItem('currentUser')
+        currentUser.value = null
+      } finally {
+        isLoading.value = false
+        hasInitialized.value = true
       }
-    }
-    isLoading.value = false
+    })().finally(() => {
+      initPromise = null
+    })
+
+    return initPromise
   }
 
-  function login(employeeId: string, password: string): boolean {
-    const user = mockApi.getUserByEmployeeId(employeeId)
-    if (user && user.password === password) {
-      currentUser.value = user
-      localStorage.setItem('currentUser', JSON.stringify(user))
-      return true
+  async function login(employeeId: string, password: string): Promise<boolean> {
+    try {
+      const data = unwrapApiData<{ user: User }>(await authApi.login(employeeId, password) as any)
+      if (data?.user) {
+        currentUser.value = data.user
+        hasInitialized.value = true
+        return true
+      }
+      return false
+    } catch (error) {
+      console.error('登录失败:', error)
+      return false
     }
-    return false
   }
 
-  function logout() {
+  async function logout() {
+    try {
+      await authApi.logout()
+    } catch {
+      // 忽略登出错误
+    }
+    wsService.disconnect()
     currentUser.value = null
-    localStorage.removeItem('currentUser')
+    hasInitialized.value = true
   }
 
-  function updateProfile(data: Partial<User>) {
+  async function updateUser(id: string, data: UserUpdateInput): Promise<User | null> {
     if (!currentUser.value) return null
+    if (!currentUser.value.isAdmin && currentUser.value.id !== id) return null
 
-    const updated = mockApi.updateUser(currentUser.value.id, data)
-    if (updated) {
-      currentUser.value = updated
-      localStorage.setItem('currentUser', JSON.stringify(updated))
+    try {
+      const result = unwrapApiData<{ user: User }>(await userApi.update(id, data) as any)
+      if (result?.user) {
+        if (currentUser.value.id === id) {
+          currentUser.value = result.user
+        }
+        return result.user
+      }
+      return null
+    } catch (error) {
+      console.error('更新用户信息失败:', error)
+      return null
     }
-    return updated
   }
 
-  function createUser(data: Omit<User, 'id'>): User | null {
+  async function updateProfile(data: UserUpdateInput): Promise<User | null> {
+    if (!currentUser.value) return null
+    return updateUser(currentUser.value.id, data)
+  }
+
+  async function changePassword(oldPassword: string, newPassword: string): Promise<boolean> {
+    try {
+      await authApi.changePassword(oldPassword, newPassword)
+      return true
+    } catch (error) {
+      console.error('修改密码失败:', error)
+      return false
+    }
+  }
+
+  async function createUser(data: UserCreateInput): Promise<User | null> {
     if (!currentUser.value?.isAdmin) return null
-    return mockApi.createUser(data)
+
+    try {
+      const result = unwrapApiData<{ user: User }>(await userApi.create(data) as any)
+      return result?.user || null
+    } catch (error) {
+      console.error('创建用户失败:', error)
+      return null
+    }
   }
 
-  function deleteUser(id: string): boolean {
+  async function deleteUser(id: string): Promise<boolean> {
     if (!currentUser.value?.isAdmin) return false
-    return mockApi.deleteUser(id)
+
+    try {
+      await userApi.delete(id)
+      return true
+    } catch (error) {
+      console.error('删除用户失败:', error)
+      return false
+    }
   }
 
-  function getAllUsers(): User[] {
-    return mockApi.getUsers()
+  async function getAllUsers(): Promise<User[]> {
+    try {
+      const data = unwrapApiData<{ users: User[] }>(await userApi.getAll() as any)
+      return data?.users || []
+    } catch (error) {
+      console.error('获取用户列表失败:', error)
+      return []
+    }
   }
 
   return {
@@ -75,7 +146,9 @@ export const useUserStore = defineStore('user', () => {
     init,
     login,
     logout,
+    updateUser,
     updateProfile,
+    changePassword,
     createUser,
     deleteUser,
     getAllUsers

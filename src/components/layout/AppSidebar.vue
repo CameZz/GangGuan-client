@@ -35,6 +35,9 @@ const completedExpanded = ref(true)
 const showNewPlanningForm = ref(false)
 const newPlanningName = ref('')
 const newPlanningDeadline = ref('')
+const editingPlanningId = ref<string | null>(null)
+const editPlanningDeadline = ref('')
+const isSavingPlanning = ref(false)
 
 // Sort by deadline helper
 function sortByDeadline(plannings: Planning[], ascending: boolean = true): Planning[] {
@@ -108,6 +111,11 @@ function selectIteration(planningId: string) {
   projectStore.setSelectedPlanning(planningId)
 }
 
+function getDateInputValue(date: string | null | undefined): string {
+  if (!date) return ''
+  return new Date(date).toISOString().split('T')[0]
+}
+
 function toggleNewPlanningForm() {
   showNewPlanningForm.value = !showNewPlanningForm.value
   if (!showNewPlanningForm.value) {
@@ -116,10 +124,10 @@ function toggleNewPlanningForm() {
   }
 }
 
-function createPlanning() {
+async function createPlanning() {
   if (!newPlanningName.value.trim() || !currentProject.value) return
 
-  const planning = planningStore.createPlanning({
+  const planning = await planningStore.createPlanning(currentProject.value.id, {
     name: newPlanningName.value.trim(),
     deadline: newPlanningDeadline.value ? new Date(newPlanningDeadline.value).toISOString() : null,
     projectId: currentProject.value.id,
@@ -133,6 +141,30 @@ function createPlanning() {
   // Auto-select the new planning
   if (planning) {
     projectStore.setSelectedPlanning(planning.id)
+  }
+}
+
+function startEditPlanning(planning: Planning) {
+  editingPlanningId.value = planning.id
+  editPlanningDeadline.value = getDateInputValue(planning.deadline)
+}
+
+function cancelEditPlanning() {
+  editingPlanningId.value = null
+  editPlanningDeadline.value = ''
+}
+
+async function savePlanningDeadline(planning: Planning) {
+  if (isSavingPlanning.value) return
+  isSavingPlanning.value = true
+  const updated = await planningStore.updatePlanning(planning.id, {
+    ...planning,
+    deadline: editPlanningDeadline.value ? new Date(editPlanningDeadline.value).toISOString() : null
+  })
+  isSavingPlanning.value = false
+
+  if (updated) {
+    cancelEditPlanning()
   }
 }
 </script>
@@ -180,18 +212,49 @@ function createPlanning() {
               未完成迭代 ({{ incompletePlannings.length }})
             </div>
             <template v-if="incompleteExpanded">
-              <div
+              <template
                 v-for="planning in incompletePlannings"
                 :key="planning.id"
-                class="iteration-item"
-                :class="{ selected: selectedPlanningId === planning.id }"
-                @click="selectIteration(planning.id)"
               >
-                <span class="iteration-name">{{ planning.name }}</span>
-                <span v-if="planning.deadline" class="iteration-deadline">
-                  {{ new Date(planning.deadline).toLocaleDateString() }}
-                </span>
-              </div>
+                <div
+                  class="iteration-item"
+                  :class="{ selected: selectedPlanningId === planning.id }"
+                  @click="selectIteration(planning.id)"
+                >
+                  <div class="iteration-info">
+                    <span class="iteration-name">{{ planning.name }}</span>
+                    <span v-if="planning.deadline" class="iteration-deadline">
+                      {{ new Date(planning.deadline).toLocaleDateString() }}
+                    </span>
+                  </div>
+                  <button
+                    class="btn-edit-planning"
+                    title="编辑迭代"
+                    aria-label="编辑迭代"
+                    @click.stop="startEditPlanning(planning)"
+                  >
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <path d="M12 20h9" />
+                      <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" />
+                    </svg>
+                  </button>
+                </div>
+                <div v-if="editingPlanningId === planning.id" class="edit-planning-form" @click.stop>
+                  <input
+                    v-model="editPlanningDeadline"
+                    type="date"
+                    class="input"
+                  />
+                  <div class="form-actions">
+                    <button class="btn btn-primary btn-sm" :disabled="isSavingPlanning" @click="savePlanningDeadline(planning)">
+                      保存
+                    </button>
+                    <button class="btn btn-secondary btn-sm" :disabled="isSavingPlanning" @click="cancelEditPlanning">
+                      取消
+                    </button>
+                  </div>
+                </div>
+              </template>
             </template>
           </template>
 
@@ -201,18 +264,49 @@ function createPlanning() {
               已完成迭代 ({{ completedPlannings.length }})
             </div>
             <template v-if="completedExpanded">
-              <div
+              <template
                 v-for="planning in completedPlannings"
                 :key="planning.id"
-                class="iteration-item completed"
-                :class="{ selected: selectedPlanningId === planning.id }"
-                @click="selectIteration(planning.id)"
               >
-                <span class="iteration-name">{{ planning.name }}</span>
-                <span v-if="planning.deadline" class="iteration-deadline">
-                  {{ new Date(planning.deadline).toLocaleDateString() }}
-                </span>
-              </div>
+                <div
+                  class="iteration-item completed"
+                  :class="{ selected: selectedPlanningId === planning.id }"
+                  @click="selectIteration(planning.id)"
+                >
+                  <div class="iteration-info">
+                    <span class="iteration-name">{{ planning.name }}</span>
+                    <span v-if="planning.deadline" class="iteration-deadline">
+                      {{ new Date(planning.deadline).toLocaleDateString() }}
+                    </span>
+                  </div>
+                  <button
+                    class="btn-edit-planning"
+                    title="编辑迭代"
+                    aria-label="编辑迭代"
+                    @click.stop="startEditPlanning(planning)"
+                  >
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <path d="M12 20h9" />
+                      <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" />
+                    </svg>
+                  </button>
+                </div>
+                <div v-if="editingPlanningId === planning.id" class="edit-planning-form" @click.stop>
+                  <input
+                    v-model="editPlanningDeadline"
+                    type="date"
+                    class="input"
+                  />
+                  <div class="form-actions">
+                    <button class="btn btn-primary btn-sm" :disabled="isSavingPlanning" @click="savePlanningDeadline(planning)">
+                      保存
+                    </button>
+                    <button class="btn btn-secondary btn-sm" :disabled="isSavingPlanning" @click="cancelEditPlanning">
+                      取消
+                    </button>
+                  </div>
+                </div>
+              </template>
             </template>
           </template>
 
@@ -328,6 +422,7 @@ function createPlanning() {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 6px;
   padding: 8px 12px;
   font-size: 13px;
   color: var(--color-text-secondary);
@@ -346,12 +441,28 @@ function createPlanning() {
   color: white;
 }
 
+.iteration-item.selected .btn-edit-planning {
+  color: rgba(255, 255, 255, 0.8);
+}
+
+.iteration-item.selected .btn-edit-planning:hover {
+  background-color: rgba(255, 255, 255, 0.16);
+  color: white;
+}
+
 .iteration-item.selected .iteration-deadline {
   color: rgba(255, 255, 255, 0.7);
 }
 
-.iteration-name {
+.iteration-info {
   flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.iteration-name {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -361,7 +472,48 @@ function createPlanning() {
   font-size: 11px;
   color: var(--color-text-muted);
   flex-shrink: 0;
-  margin-left: 8px;
+}
+
+.btn-edit-planning {
+  width: 24px;
+  height: 24px;
+  flex: 0 0 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: none;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  transition: all var(--transition-fast);
+}
+
+.btn-edit-planning:hover {
+  background-color: var(--color-bg-tertiary);
+  color: var(--color-text-primary);
+}
+
+.edit-planning-form {
+  padding: 8px 12px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.edit-planning-form .input {
+  width: 100%;
+  padding: 6px 8px;
+  font-size: 13px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background-color: var(--color-bg-primary);
+  color: var(--color-text-primary);
+}
+
+.edit-planning-form .input:focus {
+  outline: none;
+  border-color: var(--color-primary);
 }
 
 .iteration-group-title {

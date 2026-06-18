@@ -3,85 +3,134 @@
 import type { WSMessage, WSMessageType } from '@/types'
 
 type MessageHandler = (payload: any) => void
+type KickHandler = () => void
 
 class WebSocketService {
   private ws: WebSocket | null = null
   private url: string = ''
   private handlers: Map<WSMessageType, Set<MessageHandler>> = new Map()
+  private kickHandler: KickHandler | null = null
   private reconnectAttempts: number = 0
   private maxReconnectAttempts: number = 5
   private reconnectDelay: number = 3000
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null
+  private shouldReconnect: boolean = false
   private isConnected: boolean = false
-  private useMock: boolean = true // Default to mock mode
+  private isAuthenticated: boolean = false
+  private userId: string | null = null
 
-  connect(url: string): void {
-    this.url = url
-    if (this.useMock) {
-      console.log('[Mock WS] Connected to mock WebSocket')
-      this.isConnected = true
+  connect(url: string, userId: string): void {
+    const isSameConnection = this.url === url && this.userId === userId
+    const isOpenOrConnecting = this.ws?.readyState === WebSocket.OPEN || this.ws?.readyState === WebSocket.CONNECTING
+
+    if (isSameConnection && isOpenOrConnecting) {
       return
     }
 
+    this.disconnect()
+    this.url = url
+    this.userId = userId
+    this.shouldReconnect = true
+    this.open()
+  }
+
+  private open(): void {
+    if (!this.url || !this.userId) return
+
     try {
-      this.ws = new WebSocket(url)
-      this.setupEventHandlers()
+      const socket = new WebSocket(this.url)
+      this.ws = socket
+      this.setupEventHandlers(socket)
     } catch (error) {
       console.error('WebSocket connection error:', error)
       this.handleReconnect()
     }
   }
 
-  private setupEventHandlers(): void {
-    if (!this.ws) return
+  private setupEventHandlers(socket: WebSocket): void {
+    socket.onopen = () => {
+      if (this.ws !== socket) return
 
-    this.ws.onopen = () => {
       console.log('WebSocket connected')
       this.isConnected = true
       this.reconnectAttempts = 0
+
+      if (this.userId) {
+        socket.send(JSON.stringify({
+          type: 'auth',
+          userId: this.userId
+        }))
+      }
     }
 
-    this.ws.onmessage = (event) => {
+    socket.onmessage = (event) => {
+      if (this.ws !== socket) return
+
       try {
-        const message: WSMessage = JSON.parse(event.data)
-        this.dispatch(message.type, message.payload)
+        const message = JSON.parse(event.data)
+
+        if (message.type === 'ping') {
+          socket.send(JSON.stringify({ type: 'pong' }))
+          return
+        }
+
+        if (message.type === 'sync:init') {
+          this.isAuthenticated = true
+          console.log('WebSocket authenticated')
+        }
+
+        this.dispatch(message.type, message.payload || message)
       } catch (error) {
         console.error('Failed to parse WebSocket message:', error)
       }
     }
 
-    this.ws.onerror = (error) => {
+    socket.onerror = (error) => {
+      if (this.ws !== socket) return
       console.error('WebSocket error:', error)
     }
 
-    this.ws.onclose = () => {
-      console.log('WebSocket disconnected')
+    socket.onclose = (event) => {
+      if (this.ws !== socket) return
+
+      console.log('WebSocket disconnected', event.code, event.reason)
+      this.ws = null
       this.isConnected = false
+      this.isAuthenticated = false
+
+      if (event.code === 4001) {
+        console.log('Account signed in elsewhere')
+        this.shouldReconnect = false
+        this.kickHandler?.()
+        return
+      }
+
       this.handleReconnect()
     }
   }
 
   private handleReconnect(): void {
-    if (this.reconnectAttempts < this.maxReconnectAttempts) {
-      this.reconnectAttempts++
-      console.log(`Attempting to reconnect... (${this.reconnectAttempts}/${this.maxReconnectAttempts})`)
-      setTimeout(() => this.connect(this.url), this.reconnectDelay)
-    }
+    if (!this.shouldReconnect || !this.userId || !this.url) return
+    if (this.reconnectTimer) return
+    if (this.reconnectAttempts >= this.maxReconnectAttempts) return
+
+    this.reconnectAttempts++
+    console.log(`Attempting to reconnect... (${this.reconnectAttempts}/${this.maxReconnectAttempts})`)
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null
+      this.open()
+    }, this.reconnectDelay)
   }
 
   send(type: WSMessageType, payload: any): void {
-    if (this.useMock) {
-      console.log('[Mock WS] Send:', type, payload)
-      return
-    }
+    if (!this.ws || !this.isConnected) return
 
-    if (this.ws && this.isConnected) {
-      const message: WSMessage = {
-        type,
-        payload,
-        timestamp: new Date().toISOString()
-      }
-      this.ws.send(JSON.stringify(message))
+    const message: WSMessage = {
+      type,
+      payload,
+      timestamp: new Date().toISOString()
     }
+    this.ws.send(JSON.stringify(message))
   }
 
   on(type: WSMessageType, callback: MessageHandler): void {
@@ -95,24 +144,39 @@ class WebSocketService {
     this.handlers.get(type)?.delete(callback)
   }
 
+  onKick(handler: KickHandler): void {
+    this.kickHandler = handler
+  }
+
   private dispatch(type: WSMessageType, payload: any): void {
     this.handlers.get(type)?.forEach(handler => handler(payload))
   }
 
   disconnect(): void {
-    if (this.ws) {
-      this.ws.close()
-      this.ws = null
+    this.shouldReconnect = false
+    this.userId = null
+
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer)
+      this.reconnectTimer = null
     }
+
+    const socket = this.ws
+    this.ws = null
+    if (socket && socket.readyState !== WebSocket.CLOSED && socket.readyState !== WebSocket.CLOSING) {
+      socket.close()
+    }
+
     this.isConnected = false
+    this.isAuthenticated = false
   }
 
   get connected(): boolean {
     return this.isConnected
   }
 
-  setMockMode(mock: boolean): void {
-    this.useMock = mock
+  get authenticated(): boolean {
+    return this.isAuthenticated
   }
 }
 

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useRouter } from 'vue-router'
-import { useUserStore, useProjectStore } from '@/stores'
+import { useUserStore, useProjectStore, storesManager } from '@/stores'
 
 const router = useRouter()
 const userStore = useUserStore()
@@ -14,9 +14,8 @@ const currentUser = computed(() => userStore.currentUser)
 const currentProject = computed(() => projectStore.currentProject)
 const selectedPlanningId = computed(() => projectStore.selectedPlanningId)
 
-function handleLogout() {
-  userStore.logout()
-  projectStore.setCurrentProject(null)
+async function handleLogout() {
+  await storesManager.logout()
   router.push('/login')
 }
 

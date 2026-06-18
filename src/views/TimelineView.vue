@@ -387,7 +387,7 @@ const isWorkday = (date: Date): boolean => {
   return day >= 1 && day <= 5
 }
 
-const toggleWorkday = (date: Date) => {
+const toggleWorkday = async (date: Date) => {
   const project = projectStore.currentProject
   if (!project) return
 
@@ -414,7 +414,7 @@ const toggleWorkday = (date: Date) => {
     }
   }
 
-  projectStore.updateProject(project.id, { nonWorkdays, extraWorkdays })
+  await projectStore.updateProject(project.id, { nonWorkdays, extraWorkdays })
 }
 
 // Collapse rest days

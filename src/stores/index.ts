@@ -6,6 +6,8 @@ import { useMemberStore } from "./member";
 import { useTaskStore } from "./task";
 import { usePlanningStore } from "./planning";
 import { useUserStore } from "./user";
+import { wsService } from "@/utils/websocket";
+import { getWebSocketUrl, loadAppConfig } from "@/utils/config";
 
 export const pinia = createPinia();
 
@@ -18,28 +20,159 @@ export {
     useUserStore,
 };
 
-// Initialize all stores with mock data
+// Initialize all stores with API data
 class StoresManager {
     public projectStore: any = null;
     public memberStore: any = null;
     public taskStore: any = null;
     public planningStore: any = null;
     public userStore: any = null;
+    public isReady = false;
+    public isDataReady = false;
+    private initPromise: Promise<void> | null = null;
+    private dataInitPromise: Promise<void> | null = null;
+    private connectedUserId: string | null = null;
+    private hasSyncInitHandler = false;
+    private visibilityHandler: (() => void) | null = null;
 
     constructor() {}
 
-    init() {
+    private ensureStores() {
         this.projectStore = useProjectStore();
         this.memberStore = useMemberStore();
         this.taskStore = useTaskStore();
         this.planningStore = usePlanningStore();
         this.userStore = useUserStore();
+    }
 
-        this.projectStore.init();
-        this.memberStore.init();
-        this.taskStore.init();
-        this.planningStore.init();
-        this.userStore.init();
+    async init(force = false) {
+        if (this.isReady && !force) return;
+        if (this.initPromise && !force) return this.initPromise;
+
+        this.initPromise = (async () => {
+            this.ensureStores();
+
+            await this.userStore.init(force);
+
+            if (this.userStore.isLoggedIn) {
+                await this.initDataAndWebSocket();
+            } else {
+                this.clearData();
+            }
+
+            this.isReady = true;
+        })().finally(() => {
+            this.initPromise = null;
+        });
+
+        return this.initPromise;
+    }
+
+    async initDataAndWebSocket() {
+        this.ensureStores();
+
+        const userId = this.userStore.currentUser?.id;
+        if (!userId) return;
+
+        if (this.connectedUserId === userId && wsService.connected) {
+            return;
+        }
+
+        if (this.dataInitPromise && this.connectedUserId === userId) {
+            return this.dataInitPromise;
+        }
+
+        this.connectedUserId = userId;
+        this.isDataReady = false;
+
+        this.dataInitPromise = (async () => {
+            await loadAppConfig();
+            this.registerSyncInitHandler();
+
+            wsService.onKick(() => {
+                void this.handleKick();
+            });
+
+            wsService.connect(getWebSocketUrl(), userId);
+
+            // 页面可见性变化时，通过 REST API 补拉最新任务数据
+            this.visibilityHandler = () => {
+                if (document.visibilityState === 'visible') {
+                    const projectId = this.projectStore?.currentProjectId;
+                    if (projectId) {
+                        console.log('[Visibility] Tab visible, fetching tasks for project', projectId);
+                        this.taskStore?.fetchTasks?.(projectId);
+                    }
+                }
+            };
+            document.addEventListener('visibilitychange', this.visibilityHandler);
+        })().finally(() => {
+            this.dataInitPromise = null;
+        });
+
+        return this.dataInitPromise;
+    }
+
+    clearData() {
+        if (this.visibilityHandler) {
+            document.removeEventListener('visibilitychange', this.visibilityHandler);
+            this.visibilityHandler = null;
+        }
+        this.projectStore?.clearData?.();
+        this.memberStore?.clearData?.();
+        this.taskStore?.clearData?.();
+        this.planningStore?.clearData?.();
+        this.connectedUserId = null;
+        this.isDataReady = false;
+    }
+
+    async logout() {
+        this.ensureStores();
+        await this.userStore.logout();
+        this.clearData();
+    }
+
+    private registerSyncInitHandler() {
+        if (this.hasSyncInitHandler) return;
+
+        wsService.on('sync:init', (data: any) => {
+            this.applySyncData(data);
+        });
+
+        wsService.on('sync:update', (data: any) => {
+            console.log('[WS] sync:update received', data);
+            this.applySyncData(data);
+        });
+
+        this.hasSyncInitHandler = true;
+    }
+
+    private applySyncData(data: any) {
+        console.log('[WS] Received sync:init', data);
+
+        if (data.projects) {
+            this.projectStore.setProjects(data.projects);
+        }
+
+        if (data.plannings) {
+            this.planningStore.setPlannings(data.plannings);
+        }
+
+        if (data.tasks) {
+            this.taskStore.setTasks(data.tasks);
+        }
+
+        if (data.users) {
+            this.memberStore.setMembers(data.users);
+        }
+
+        this.isDataReady = true;
+    }
+
+    private async handleKick() {
+        await this.userStore.logout();
+        this.clearData();
+        window.location.href = '/login';
     }
 }
 

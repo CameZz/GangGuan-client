@@ -57,10 +57,10 @@ function handleCancel() {
   saveMessage.value = ''
 }
 
-function handleSave() {
+async function handleSave() {
   if (!currentUser.value) return
 
-  const updated = userStore.updateProfile({
+  const updated = await userStore.updateProfile({
     name: form.value.name,
     phone: form.value.phone,
     email: form.value.email,
@@ -76,7 +76,7 @@ function handleSave() {
   }
 }
 
-function handleChangePassword() {
+async function handleChangePassword() {
   passwordError.value = ''
   passwordSuccess.value = ''
 
@@ -100,14 +100,10 @@ function handleChangePassword() {
     return
   }
 
-  if (passwordForm.value.oldPassword !== currentUser.value?.password) {
-    passwordError.value = '旧密码错误'
-    return
-  }
-
-  const updated = userStore.updateProfile({
-    password: passwordForm.value.newPassword
-  })
+  const updated = await userStore.changePassword(
+    passwordForm.value.oldPassword,
+    passwordForm.value.newPassword
+  )
 
   if (updated) {
     passwordSuccess.value = '密码修改成功'
@@ -120,6 +116,8 @@ function handleChangePassword() {
       passwordSuccess.value = ''
       isChangingPassword.value = false
     }, 3000)
+  } else {
+    passwordError.value = '密码修改失败，请确认旧密码是否正确'
   }
 }
 

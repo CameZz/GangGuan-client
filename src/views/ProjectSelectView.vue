@@ -1,7 +1,10 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { useUserStore, useProjectStore } from '@/stores'
+import { useUserStore, useProjectStore, storesManager } from '@/stores'
+import ProjectModal from '@/components/project/ProjectModal.vue'
+import type { Project } from '@/types'
+import { createDefaultPhaseTemplates } from '@/utils/taskPhases'
 
 const router = useRouter()
 const userStore = useUserStore()
@@ -9,16 +12,62 @@ const projectStore = useProjectStore()
 
 const currentUser = computed(() => userStore.currentUser)
 const projects = computed(() => projectStore.projects)
+const canCreateProject = computed(() => userStore.isProjectManager)
+const isProjectModalOpen = ref(false)
+const isCreatingProject = ref(false)
+const createProjectError = ref('')
 
 function selectProject(projectId: string) {
   projectStore.setCurrentProject(projectId)
   router.push(`/kanban/${projectId}`)
 }
 
-function handleLogout() {
-  userStore.logout()
-  projectStore.setCurrentProject(null)
+async function handleLogout() {
+  await storesManager.logout()
   router.push('/login')
+}
+
+function openProjectModal() {
+  createProjectError.value = ''
+  isProjectModalOpen.value = true
+}
+
+function closeProjectModal() {
+  if (isCreatingProject.value) return
+  isProjectModalOpen.value = false
+  createProjectError.value = ''
+}
+
+async function handleProjectCreate(projectData: Partial<Project>) {
+  if (isCreatingProject.value) return
+
+  const name = projectData.name?.trim()
+  if (!name) {
+    createProjectError.value = '请输入项目名称'
+    return
+  }
+
+  createProjectError.value = ''
+  isCreatingProject.value = true
+
+  const project = await projectStore.createProject({
+    name,
+    description: projectData.description?.trim() || '',
+    phaseTemplates: createDefaultPhaseTemplates(),
+    nonWorkdays: [],
+    extraWorkdays: []
+  })
+
+  isCreatingProject.value = false
+
+  if (!project) {
+    createProjectError.value = '创建项目失败，请稍后重试'
+    return
+  }
+
+  projectStore.setCurrentProject(project.id)
+  closeProjectModal()
+  router.push(`/kanban/${project.id}`)
 }
 </script>
 
@@ -33,7 +82,15 @@ function handleLogout() {
     </header>
 
     <main class="page-content">
-      <h2 class="section-title">选择要操作的项目</h2>
+      <div class="section-header">
+        <h2 class="section-title">选择要操作的项目</h2>
+        <button v-if="canCreateProject" class="btn btn-primary" @click="openProjectModal">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M12 5v14M5 12h14" />
+          </svg>
+          新建项目
+        </button>
+      </div>
       <div class="projects-grid">
         <div
           v-for="project in projects"
@@ -57,6 +114,14 @@ function handleLogout() {
         <p>暂无可用项目</p>
       </div>
     </main>
+
+    <ProjectModal
+      :is-open="isProjectModalOpen"
+      :saving="isCreatingProject"
+      :error="createProjectError"
+      @close="closeProjectModal"
+      @save="handleProjectCreate"
+    />
   </div>
 </template>
 
@@ -98,11 +163,25 @@ function handleLogout() {
   padding: 48px 32px;
 }
 
+.section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
 .section-title {
   font-size: 24px;
   font-weight: 600;
   color: var(--color-text-primary);
-  margin-bottom: 24px;
+}
+
+.section-header .btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
 }
 
 .projects-grid {

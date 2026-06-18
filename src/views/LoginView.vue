@@ -10,7 +10,7 @@ const employeeId = ref('')
 const password = ref('')
 const error = ref('')
 
-function handleLogin() {
+async function handleLogin() {
   error.value = ''
 
   if (!employeeId.value || !password.value) {
@@ -18,8 +18,11 @@ function handleLogin() {
     return
   }
 
-  const success = userStore.login(employeeId.value, password.value)
+  const success = await userStore.login(employeeId.value, password.value)
   if (success) {
+    // 初始化 WebSocket 和数据
+    const { storesManager } = await import('@/stores')
+    await storesManager.initDataAndWebSocket()
     router.push('/projects')
   } else {
     error.value = '工号或密码错误'

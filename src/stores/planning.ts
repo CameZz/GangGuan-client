@@ -3,7 +3,9 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import type { Planning } from '@/types'
-import mockApi from '@/utils/mock'
+import { planningApi } from '@/api/plannings'
+import { unwrapApiData } from '@/api'
+import { wsService } from '@/utils/websocket'
 
 export const usePlanningStore = defineStore('planning', () => {
   const plannings = ref<Planning[]>([])
@@ -19,52 +21,85 @@ export const usePlanningStore = defineStore('planning', () => {
     return plannings.value.filter(p => p.projectId === projectId)
   }
 
-  function init() {
-    isLoading.value = true
-    plannings.value = mockApi.getPlannings()
-    isLoading.value = false
+  async function init() {
+    // plannings 会在 sync:init 时通过 WebSocket 获取
+    // 这里留空，等待 WebSocket 同步
   }
 
-  function createPlanning(data: Omit<Planning, 'id' | 'createdAt'>) {
-    const planning = mockApi.createPlanning(data)
-    plannings.value.push(planning)
-    return planning
+  // 从 WebSocket sync:init 设置数据
+  function setPlannings(data: Planning[]) {
+    plannings.value = data
   }
 
-  function updatePlanning(id: string, data: Partial<Planning>) {
-    const updated = mockApi.updatePlanning(id, data)
-    if (updated) {
-      const index = plannings.value.findIndex(p => p.id === id)
-      if (index !== -1) {
-        plannings.value[index] = updated
+  function clearData() {
+    plannings.value = []
+  }
+
+  async function createPlanning(projectId: string, data: Omit<Planning, 'id' | 'createdAt'>): Promise<Planning | null> {
+    try {
+      const result = unwrapApiData<{ planning: Planning }>(await planningApi.create(projectId, data) as any)
+      if (result?.planning) {
+        const planning = result.planning
+        plannings.value.push(planning)
+        return planning
       }
+      return null
+    } catch (error) {
+      console.error('创建规划失败:', error)
+      return null
     }
-    return updated
   }
 
-  function deletePlanning(id: string) {
-    const success = mockApi.deletePlanning(id)
-    if (success) {
+  async function updatePlanning(id: string, data: Partial<Planning>): Promise<Planning | null> {
+    try {
+      const existing = plannings.value.find(p => p.id === id)
+      const projectId = data.projectId || existing?.projectId
+      if (!projectId) return null
+      const result = unwrapApiData<{ planning: Planning }>(await planningApi.update(id, {
+        ...data,
+        projectId
+      }) as any)
+      if (result?.planning) {
+        const planning = result.planning
+        const index = plannings.value.findIndex(p => p.id === id)
+        if (index !== -1) {
+          plannings.value[index] = planning
+        }
+        return planning
+      }
+      return null
+    } catch (error) {
+      console.error('更新规划失败:', error)
+      return null
+    }
+  }
+
+  async function deletePlanning(id: string): Promise<boolean> {
+    try {
+      await planningApi.delete(id)
       plannings.value = plannings.value.filter(p => p.id !== id)
+      return true
+    } catch (error) {
+      console.error('删除规划失败:', error)
+      return false
     }
-    return success
   }
 
-  // Listen for mock events
-  mockApi.on('planning:create', (planning: Planning) => {
+  // 监听 WebSocket 事件
+  wsService.on('planning:create', (planning: Planning) => {
     if (!plannings.value.find(p => p.id === planning.id)) {
       plannings.value.push(planning)
     }
   })
 
-  mockApi.on('planning:update', (planning: Planning) => {
+  wsService.on('planning:update', (planning: Planning) => {
     const index = plannings.value.findIndex(p => p.id === planning.id)
     if (index !== -1) {
       plannings.value[index] = planning
     }
   })
 
-  mockApi.on('planning:delete', ({ id }: { id: string }) => {
+  wsService.on('planning:delete', ({ id }: { id: string }) => {
     plannings.value = plannings.value.filter(p => p.id !== id)
   })
 
@@ -75,6 +110,8 @@ export const usePlanningStore = defineStore('planning', () => {
     getPlanningById,
     getPlanningsByProject,
     init,
+    setPlannings,
+    clearData,
     createPlanning,
     updatePlanning,
     deletePlanning

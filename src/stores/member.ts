@@ -1,23 +1,11 @@
-// Member store - manages team member state (delegates to userStore)
+// Member store - manages team member state
 
 import { defineStore } from 'pinia'
-import { computed } from 'vue'
-import type { Member } from '@/types'
-import { useUserStore } from './user'
+import { ref, computed } from 'vue'
+import type { Member, User } from '@/types'
 
 export const useMemberStore = defineStore('member', () => {
-  const userStore = useUserStore()
-
-  // Convert User[] to Member[] (User has all Member fields plus extra)
-  const members = computed<Member[]>(() =>
-    userStore.getAllUsers().map(u => ({
-      id: u.id,
-      name: u.name,
-      avatar: u.avatar,
-      email: u.email,
-      role: u.role
-    }))
-  )
+  const members = ref<Member[]>([])
 
   const memberCount = computed(() => members.value.length)
 
@@ -26,13 +14,30 @@ export const useMemberStore = defineStore('member', () => {
   }
 
   function init() {
-    // No initialization needed - members are computed from users
+    // 数据会在 WebSocket sync:init 时设置
+  }
+
+  // 从 WebSocket sync:init 设置数据
+  function setMembers(users: User[]) {
+    members.value = users.map(u => ({
+      id: u.id,
+      name: u.name,
+      avatar: u.avatar,
+      email: u.email,
+      role: u.role
+    }))
+  }
+
+  function clearData() {
+    members.value = []
   }
 
   return {
     members,
     memberCount,
     getMemberById,
-    init
+    init,
+    setMembers,
+    clearData
   }
 })

@@ -2,7 +2,7 @@
 
 import { createRouter, createWebHistory } from 'vue-router'
 import type { RouteRecordRaw } from 'vue-router'
-import { useUserStore, useProjectStore } from '@/stores'
+import { useUserStore, useProjectStore, storesManager } from '@/stores'
 
 const routes: RouteRecordRaw[] = [
   {
@@ -114,13 +114,11 @@ const router = createRouter({
   routes
 })
 
-// Navigation guard
-router.beforeEach((to, _from, next) => {
+router.beforeEach(async (to) => {
+  await storesManager.init()
+
   const userStore = useUserStore()
   const projectStore = useProjectStore()
-  if (!userStore.isLoggedIn) {
-    userStore.init()
-  }
   const canManageProject = userStore.isAdmin || userStore.currentUser?.role === 'pm'
   const routeProjectId = typeof to.params.projectId === 'string'
     ? to.params.projectId
@@ -129,24 +127,35 @@ router.beforeEach((to, _from, next) => {
       : null
 
   if (to.meta.requiresAuth !== false && !userStore.isLoggedIn) {
-    next('/login')
-  } else if (to.meta.requiresAdmin && !userStore.isAdmin) {
-    next('/')
-  } else if (to.meta.requiresProject && !projectStore.currentProjectId && routeProjectId) {
+    return '/login'
+  }
+
+  if (to.name === 'Login' && userStore.isLoggedIn) {
+    return '/projects'
+  }
+
+  if (to.meta.requiresAdmin && !userStore.isAdmin) {
+    return '/'
+  }
+
+  if (to.meta.requiresProject && routeProjectId && projectStore.currentProjectId !== routeProjectId) {
     projectStore.setCurrentProject(routeProjectId)
     if (to.meta.requiresProjectManager && !canManageProject) {
-      next(`/kanban/${routeProjectId}`)
-    } else {
-      next()
+      return `/kanban/${routeProjectId}`
     }
-  } else if (to.meta.requiresProjectManager && !canManageProject) {
-    const redirectProjectId = routeProjectId || projectStore.currentProjectId
-    next(redirectProjectId ? `/kanban/${redirectProjectId}` : '/projects')
-  } else if (to.meta.requiresProject && !projectStore.currentProjectId) {
-    next('/projects')
-  } else {
-    next()
+    return true
   }
+
+  if (to.meta.requiresProjectManager && !canManageProject) {
+    const redirectProjectId = routeProjectId || projectStore.currentProjectId
+    return redirectProjectId ? `/kanban/${redirectProjectId}` : '/projects'
+  }
+
+  if (to.meta.requiresProject && !projectStore.currentProjectId) {
+    return '/projects'
+  }
+
+  return true
 })
 
 export default router

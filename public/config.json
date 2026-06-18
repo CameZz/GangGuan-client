@@ -1,0 +1,7 @@
+{
+  "serverUrl": "http://localhost:3001",
+  "apiPath": "/api",
+  "wsPath": "/ws",
+  "apiBaseUrl": "/api",
+  "wsUrl": "/ws"
+}

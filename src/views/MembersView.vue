@@ -1,15 +1,15 @@
 <script setup lang="ts">
 import { ref, computed, watchEffect } from 'vue'
 import { useRoute } from 'vue-router'
-import { useUserStore, useTaskStore, useProjectStore } from '@/stores'
+import { useMemberStore, useTaskStore, useProjectStore } from '@/stores'
 import { ROLES } from '@/types'
 
 const route = useRoute()
-const userStore = useUserStore()
+const memberStore = useMemberStore()
 const taskStore = useTaskStore()
 const projectStore = useProjectStore()
 
-const users = computed(() => userStore.getAllUsers())
+const users = computed(() => memberStore.members)
 const selectedRole = ref<string>('')
 
 // Get projectId and planningId from route
@@ -118,7 +118,6 @@ function getRoleName(roleType: string): string {
             <p class="member-email">{{ user.email }}</p>
             <div class="member-tags">
               <span class="role-badge">{{ getRoleName(user.role) }}</span>
-              <span v-if="user.isAdmin" class="admin-badge">管理员</span>
             </div>
           </div>
         </div>

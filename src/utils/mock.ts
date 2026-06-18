@@ -22,14 +22,20 @@ import {
 type ProjectSeed = Omit<Project, "phaseTemplates"> & Partial<Pick<Project, "phaseTemplates">>;
 type TaskSeed = Omit<Task, "itemType" | "parentRequirementId" | "phases" | "currentPhaseId"> &
     Partial<Pick<Task, "itemType" | "parentRequirementId" | "phases" | "currentPhaseId">>;
+type MockUser = User & { password: string };
 
 // Generate unique IDs
 const generateId = (): string => {
     return Date.now().toString(36) + Math.random().toString(36).substr(2, 9);
 };
 
+const toPublicUser = (user: MockUser): User => {
+    const { password: _password, ...publicUser } = user;
+    return publicUser;
+};
+
 // Initial mock data
-const mockUsers: User[] = [
+const mockUsers: MockUser[] = [
     // PM (项目管理)
     {
         id: "user-1",
@@ -1270,7 +1276,7 @@ const mockTaskProgressHistories: TaskProgressHistory[] = [
 let projects: Project[] = mockProjects.map(normalizeProject);
 let plannings: Planning[] = [...mockPlannings];
 let tasks: Task[] = mockTasks.map(normalizeTask);
-let users: User[] = [...mockUsers];
+let users: MockUser[] = [...mockUsers];
 let taskHistories: TaskHistory[] = [];
 let taskProgressHistories: TaskProgressHistory[] = [...mockTaskProgressHistories];
 
@@ -1286,32 +1292,35 @@ const trigger = (type: string, payload: any): void => {
 // Mock API functions
 export const mockApi = {
     // Users
-    getUsers: (): User[] => [...users],
+    getUsers: (): User[] => users.map(toPublicUser),
 
-    getUserByEmployeeId: (employeeId: string): User | undefined => {
+    getUserByEmployeeId: (employeeId: string): MockUser | undefined => {
         return users.find((u) => u.employeeId === employeeId);
     },
 
     getUserById: (id: string): User | undefined => {
-        return users.find((u) => u.id === id);
+        const user = users.find((u) => u.id === id);
+        return user ? toPublicUser(user) : undefined;
     },
 
-    createUser: (data: Omit<User, "id">): User => {
-        const user: User = {
+    createUser: (data: Omit<User, "id"> & { password: string }): User => {
+        const user: MockUser = {
             ...data,
             id: generateId(),
         };
         users.push(user);
-        trigger("user:create", user);
-        return user;
+        const publicUser = toPublicUser(user);
+        trigger("user:create", publicUser);
+        return publicUser;
     },
 
-    updateUser: (id: string, data: Partial<User>): User | null => {
+    updateUser: (id: string, data: Partial<User> & { password?: string }): User | null => {
         const index = users.findIndex((u) => u.id === id);
         if (index === -1) return null;
         users[index] = { ...users[index], ...data };
-        trigger("user:update", users[index]);
-        return users[index];
+        const publicUser = toPublicUser(users[index]);
+        trigger("user:update", publicUser);
+        return publicUser;
     },
 
     deleteUser: (id: string): boolean => {
@@ -1487,7 +1496,7 @@ export const mockApi = {
         projects: projects.map(normalizeProject),
         plannings: [...plannings],
         tasks: tasks.map(normalizeTask),
-        users: [...users],
+        users: users.map(toPublicUser),
     }),
 
     // Reset to initial state

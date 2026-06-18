@@ -3,21 +3,20 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import type { ProjectPhaseTemplate, Task, TaskPhase, TaskStatus, TaskPriority, TaskHistory, TaskProgressHistory } from '@/types'
-import { formatHistoryValue } from '@/types'
-import mockApi from '@/utils/mock'
+import { taskApi } from '@/api/tasks'
+import { historyApi } from '@/api/histories'
+import { unwrapApiData } from '@/api'
+import { wsService } from '@/utils/websocket'
 import { useUserStore } from './user'
-import { useMemberStore } from './member'
 import { useProjectStore } from './project'
 import {
-  createTaskPhaseFromTemplate,
   deriveStageFromPhase,
   deriveStatusFromPhases,
   getCurrentTaskPhase,
   getTaskPhaseProgress,
   getTaskStageLabel,
   getTaskStageValue,
-  normalizeTaskPhases,
-  summarizeTaskPhases
+  normalizeTaskPhases
 } from '@/utils/taskPhases'
 
 export const useTaskStore = defineStore('task', () => {
@@ -72,66 +71,151 @@ export const useTaskStore = defineStore('task', () => {
     return projectStore.getEnabledPhaseTemplates(projectId)
   }
 
-  function buildTaskPhasesFromTemplates(
-    projectId: string,
-    templateIds?: string[],
-    existingPhases: TaskPhase[] = []
-  ): TaskPhase[] {
-    const templates = getEnabledPhaseTemplates(projectId)
-    const existingByTemplateId = new Map(existingPhases.map(phase => [phase.templateId, phase]))
-    const selectedTemplates = (templateIds && templateIds.length > 0)
-      ? templateIds
-        .map(templateId => templates.find(template => template.id === templateId))
-        .filter((template): template is ProjectPhaseTemplate => !!template)
-      : templates
-    return selectedTemplates.map((template, index) => {
-      const existing = existingByTemplateId.get(template.id)
-      if (existing) {
-        return {
-          ...existing,
-          name: existing.name || template.name,
-          order: index
+  // 从 WebSocket sync:init 设置数据
+  function setTasks(data: Task[]) {
+    tasks.value = data
+  }
+
+  function clearData() {
+    tasks.value = []
+  }
+
+  // Initialize tasks - 从 WebSocket sync:init 获取
+  async function init() {
+    // 数据会在 WebSocket sync:init 时设置
+  }
+
+  // 通过 REST API 拉取指定项目的任务（用于回退同步）
+  async function fetchTasks(projectId: string): Promise<void> {
+    try {
+      const data = unwrapApiData<{ tasks: Task[] }>(await taskApi.getByProject(projectId) as any)
+      if (data?.tasks) {
+        const merged = [...tasks.value]
+        for (const task of data.tasks) {
+          const idx = merged.findIndex(t => t.id === task.id)
+          if (idx !== -1) {
+            merged[idx] = task
+          } else {
+            merged.push(task)
+          }
+        }
+        tasks.value = merged
+      }
+    } catch (error) {
+      console.error('获取任务列表失败:', error)
+    }
+  }
+
+  async function createTask(data: Omit<Task, 'id' | 'createdAt' | 'updatedAt'>): Promise<Task | null> {
+    try {
+      const result = unwrapApiData<any>(await taskApi.create(data) as any)
+      // 兼容多种响应格式：{ task } / 直接返回 task 对象
+      const task: Task | null = result?.task || (result?.id ? result : null)
+      if (task) {
+        if (!tasks.value.find(t => t.id === task.id)) {
+          tasks.value.push(task)
+        }
+        return task
+      }
+      console.warn('创建任务响应格式异常:', result)
+      return null
+    } catch (error) {
+      console.error('创建任务失败:', error)
+      return null
+    }
+  }
+
+  async function updateTask(id: string, data: Partial<Task>, operatorId?: string): Promise<Task | null> {
+    try {
+      const result = unwrapApiData<any>(await taskApi.update(id, data) as any)
+      // 兼容多种响应格式：{ task } / 直接返回 task 对象
+      let task: Task | null = result?.task || (result?.id ? result : null)
+
+      // 如果响应中没有任务数据，通过 GET 接口重新拉取
+      if (!task) {
+        console.warn('更新任务响应中无任务数据，尝试通过 GET 拉取:', result)
+        try {
+          const fresh = unwrapApiData<any>(await taskApi.getById(id) as any)
+          task = fresh?.task || (fresh?.id ? fresh : null)
+        } catch (fetchErr) {
+          console.error('拉取更新后的任务失败:', fetchErr)
         }
       }
-      return createTaskPhaseFromTemplate(template, index)
-    })
-  }
 
-  function deriveExecutionFields(
-    task: Partial<Task>,
-    existing?: Task
-  ): Pick<Task, 'stage' | 'assigneeId' | 'status' | 'phases' | 'currentPhaseId'> {
-    const statusInput = task.status || existing?.status || 'todo'
-    let phases = normalizeTaskPhases(task.phases || existing?.phases || [])
-
-    if (task.status === 'done') {
-      phases = phases.map(phase => ({ ...phase, progress: 100, status: 'done' }))
-    } else if (task.status === 'todo') {
-      phases = phases.map(phase => ({ ...phase, progress: 0, status: 'pending' }))
-    } else if (task.status === 'in-progress' && phases.length > 0 && phases.every(phase => phase.progress === 0)) {
-      phases = phases.map((phase, index) => index === 0 ? { ...phase, progress: 1, status: 'in-progress' } : phase)
-    }
-
-    phases = normalizeTaskPhases(phases)
-    const currentPhase = getCurrentTaskPhase(phases)
-    return {
-      phases,
-      currentPhaseId: currentPhase?.id || null,
-      stage: deriveStageFromPhase(currentPhase, task.stage || existing?.stage || 'filed'),
-      assigneeId: currentPhase?.assigneeId || task.assigneeId || existing?.assigneeId || null,
-      status: deriveStatusFromPhases(phases, statusInput)
+      if (task) {
+        const index = tasks.value.findIndex(t => t.id === id)
+        if (index !== -1) {
+          tasks.value[index] = task
+        }
+        return task
+      }
+      return null
+    } catch (error) {
+      console.error('更新任务失败:', error)
+      return null
     }
   }
 
-  function updateTaskPhaseProgress(taskId: string, phaseId: string, progress: number, operatorId?: string) {
-    const task = tasks.value.find(t => t.id === taskId)
-    if (!task || isRequirement(task)) return null
-    const phases = normalizeTaskPhases(task.phases).map(phase =>
-      phase.id === phaseId
-        ? { ...phase, progress }
-        : phase
-    )
-    return updateTask(taskId, { phases }, operatorId)
+  async function deleteTask(id: string): Promise<boolean> {
+    const task = tasks.value.find(t => t.id === id)
+    if (task && isRequirement(task) && getChildTasks(id).length > 0) {
+      return false
+    }
+
+    try {
+      await taskApi.delete(id)
+      tasks.value = tasks.value.filter(t => t.id !== id)
+      return true
+    } catch (error) {
+      console.error('删除任务失败:', error)
+      return false
+    }
+  }
+
+  async function moveTask(id: string, status: TaskStatus, operatorId?: string): Promise<Task | null> {
+    try {
+      const result = unwrapApiData<any>(await taskApi.move(id, status) as any)
+      const task: Task | null = result?.task || (result?.id ? result : null)
+      if (task) {
+        const index = tasks.value.findIndex(t => t.id === id)
+        if (index !== -1) {
+          tasks.value[index] = task
+        }
+        return task
+      }
+      return null
+    } catch (error) {
+      console.error('移动任务失败:', error)
+      return null
+    }
+  }
+
+  async function updateTaskPhaseProgress(taskId: string, phaseId: string, progress: number, operatorId?: string): Promise<Task | null> {
+    try {
+      const result = unwrapApiData<any>(await taskApi.updatePhaseProgress(taskId, phaseId, progress) as any)
+      let task: Task | null = result?.task || (result?.id ? result : null)
+
+      if (!task) {
+        try {
+          const fresh = unwrapApiData<any>(await taskApi.getById(taskId) as any)
+          task = fresh?.task || (fresh?.id ? fresh : null)
+        } catch (fetchErr) {
+          console.error('拉取更新后的任务失败:', fetchErr)
+        }
+      }
+
+      if (task) {
+        const index = tasks.value.findIndex(t => t.id === taskId)
+        if (index !== -1) {
+          tasks.value[index] = task
+        }
+        return task
+      }
+      return null
+    } catch (error) {
+      console.error('更新阶段进度失败:', error)
+      return null
+    }
   }
 
   function canEditTaskPhaseProgress(phase: TaskPhase, userId?: string | null): boolean {
@@ -139,175 +223,42 @@ export const useTaskStore = defineStore('task', () => {
     return userStore.isAdmin || (!!userId && phase.assigneeId === userId)
   }
 
-  function normalizeTaskData(data: Partial<Task>, existing?: Task): Partial<Task> {
-    const itemType = data.itemType || existing?.itemType || 'task'
-    if (itemType === 'requirement') {
-      return {
-        ...data,
-        itemType,
-        parentRequirementId: null,
-        assigneeId: null,
-        dueDate: null,
-        phases: [],
-        currentPhaseId: null
-      }
-    }
-
-    let parentRequirementId = data.parentRequirementId || null
-    if (parentRequirementId) {
-      const projectId = data.projectId || existing?.projectId
-      const parent = tasks.value.find(t => t.id === parentRequirementId)
-      if (!parent || !isRequirement(parent) || (projectId && parent.projectId !== projectId)) {
-        parentRequirementId = null
-      }
-    }
-
-    const projectId = data.projectId || existing?.projectId || ''
-    const projectTemplates = getEnabledPhaseTemplates(projectId)
-    const allowedTemplateIds = new Set(projectTemplates.map(template => template.id))
-    let phases = normalizeTaskPhases(data.phases || existing?.phases || [])
-      .filter(phase => allowedTemplateIds.has(phase.templateId) || existing?.phases?.some(existingPhase => existingPhase.id === phase.id))
-
-    if (phases.length === 0 && projectTemplates.length > 0) {
-      phases = buildTaskPhasesFromTemplates(projectId)
-    }
-
-    const executionFields = deriveExecutionFields({ ...data, phases }, existing)
-    return {
-      ...data,
-      ...executionFields,
-      itemType,
-      parentRequirementId
-    }
-  }
-
-  // Initialize tasks from mock API
-  function init() {
-    isLoading.value = true
-    tasks.value = mockApi.getTasks()
-    isLoading.value = false
-  }
-
-  function createTask(data: Omit<Task, 'id' | 'createdAt' | 'updatedAt'>) {
-    const task = mockApi.createTask(normalizeTaskData(data) as Omit<Task, 'id' | 'createdAt' | 'updatedAt'>)
-    if (!tasks.value.find(t => t.id === task.id)) {
-      tasks.value.push(task)
-    }
-    return task
-  }
-
-  const HISTORY_FIELDS = ['status', 'priority', 'stage', 'phases', 'assigneeId', 'dueDate', 'title', 'description'] as const
-
-  function recordProgressHistories(taskId: string, oldPhases: TaskPhase[], newPhases: TaskPhase[], operatorId: string) {
-    const oldById = new Map(normalizeTaskPhases(oldPhases).map(phase => [phase.id, phase]))
-    for (const phase of normalizeTaskPhases(newPhases)) {
-      const oldPhase = oldById.get(phase.id)
-      if (!oldPhase || oldPhase.progress === phase.progress) continue
-      mockApi.addTaskProgressHistory({
-        taskId,
-        phaseId: phase.id,
-        phaseName: phase.name,
-        assigneeId: phase.assigneeId,
-        operatorId,
-        oldProgress: oldPhase.progress,
-        newProgress: phase.progress
-      })
-    }
-  }
-
-  function isPureProgressPhaseChange(oldPhases: TaskPhase[], newPhases: TaskPhase[]): boolean {
-    const stripProgress = (phases: TaskPhase[]) => normalizeTaskPhases(phases).map(phase => ({
-      ...phase,
-      progress: 0,
-      status: 'pending'
-    }))
-    return JSON.stringify(stripProgress(oldPhases)) === JSON.stringify(stripProgress(newPhases))
-  }
-
-  function updateTask(id: string, data: Partial<Task>, operatorId?: string) {
-    const oldTask = tasks.value.find(t => t.id === id)
-    if (oldTask && operatorId) {
-      const userStore = useUserStore()
-      const memberStore = useMemberStore()
-      const resolvedOperatorId = operatorId || userStore.currentUser?.id || ''
-      if (data.phases) {
-        recordProgressHistories(id, oldTask.phases || [], data.phases, resolvedOperatorId)
-      }
-      for (const field of HISTORY_FIELDS) {
-        if (data[field] === undefined) continue
-        const oldVal = oldTask[field]
-        const newVal = data[field]
-        if (field === 'phases' && isPureProgressPhaseChange(oldVal as TaskPhase[], newVal as TaskPhase[])) continue
-        const oldStr = field === 'phases' ? JSON.stringify(oldVal ?? []) : String(oldVal ?? '')
-        const newStr = field === 'phases' ? JSON.stringify(newVal ?? []) : String(newVal ?? '')
-        if (oldStr === newStr) continue
-        let displayOld = oldStr
-        let displayNew = newStr
-        if (field === 'assigneeId') {
-          displayOld = oldVal ? (memberStore.getMemberById(oldVal as string)?.name || oldStr) : ''
-          displayNew = newVal ? (memberStore.getMemberById(newVal as string)?.name || newStr) : ''
-        } else if (field === 'phases') {
-          displayOld = summarizeTaskPhases(oldVal as TaskPhase[])
-          displayNew = summarizeTaskPhases(newVal as TaskPhase[])
-        } else {
-          displayOld = formatHistoryValue(field, oldStr)
-          displayNew = formatHistoryValue(field, newStr)
-        }
-        mockApi.addTaskHistory({
-          taskId: id,
-          operatorId: resolvedOperatorId,
-          field,
-          oldValue: displayOld,
-          newValue: displayNew
-        })
-      }
-    }
-    const updated = mockApi.updateTask(id, normalizeTaskData(data, oldTask))
-    if (updated) {
-      const index = tasks.value.findIndex(t => t.id === id)
-      if (index !== -1) {
-        tasks.value[index] = updated
-      }
-    }
-    return updated
-  }
-
-  function deleteTask(id: string) {
-    const task = tasks.value.find(t => t.id === id)
-    if (task && isRequirement(task) && getChildTasks(id).length > 0) {
-      return false
-    }
-    const success = mockApi.deleteTask(id)
-    if (success) {
-      tasks.value = tasks.value.filter(t => t.id !== id)
-    }
-    return success
-  }
-
-  function moveTask(id: string, status: TaskStatus, operatorId?: string) {
-    return updateTask(id, { status }, operatorId)
-  }
-
   function isUserParticipating(task: Task, userId: string): boolean {
     return task.assigneeId === userId ||
       normalizeTaskPhases(task.phases).some(phase => phase.assigneeId === userId)
   }
 
-  // Filter tasks
-  function getTaskHistories(taskId: string): TaskHistory[] {
-    return mockApi.getTaskHistories(taskId)
+  // 获取任务历史
+  async function getTaskHistories(taskId: string): Promise<TaskHistory[]> {
+    try {
+      const data = unwrapApiData<{ histories: TaskHistory[] }>(await historyApi.getTaskHistories(taskId) as any)
+      return data?.histories || []
+    } catch (error) {
+      console.error('获取任务历史失败:', error)
+      return []
+    }
   }
 
-  function getTaskProgressHistories(taskId: string): TaskProgressHistory[] {
-    return mockApi.getTaskProgressHistories(taskId)
+  // 获取任务进度历史
+  async function getTaskProgressHistories(taskId: string): Promise<TaskProgressHistory[]> {
+    try {
+      const data = unwrapApiData<{ histories: TaskProgressHistory[] }>(await historyApi.getTaskProgressHistories(taskId) as any)
+      return data?.histories || []
+    } catch (error) {
+      console.error('获取进度历史失败:', error)
+      return []
+    }
   }
 
-  function getProjectTaskProgressHistories(projectId: string): TaskProgressHistory[] {
-    const projectTaskIds = new Set(tasks.value.filter(task => task.projectId === projectId).map(task => task.id))
-    return tasks.value
-      .filter(task => projectTaskIds.has(task.id))
-      .flatMap(task => mockApi.getTaskProgressHistories(task.id))
-      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+  // 获取项目进度历史
+  async function getProjectTaskProgressHistories(projectId: string): Promise<TaskProgressHistory[]> {
+    try {
+      const data = unwrapApiData<{ histories: TaskProgressHistory[] }>(await historyApi.getProjectProgressHistories(projectId) as any)
+      return data?.histories || []
+    } catch (error) {
+      console.error('获取项目进度历史失败:', error)
+      return []
+    }
   }
 
   function getTasksByFilters(filters: {
@@ -327,21 +278,24 @@ export const useTaskStore = defineStore('task', () => {
     })
   }
 
-  // Listen for mock events
-  mockApi.on('task:create', (task: Task) => {
+  // 监听 WebSocket 事件
+  wsService.on('task:create', (task: Task) => {
+    console.log('[WS] task:create received', task?.id, task?.title)
     if (!tasks.value.find(t => t.id === task.id)) {
       tasks.value.push(task)
     }
   })
 
-  mockApi.on('task:update', (task: Task) => {
+  wsService.on('task:update', (task: Task) => {
+    console.log('[WS] task:update received', task?.id)
     const index = tasks.value.findIndex(t => t.id === task.id)
     if (index !== -1) {
       tasks.value[index] = task
     }
   })
 
-  mockApi.on('task:delete', ({ id }: { id: string }) => {
+  wsService.on('task:delete', ({ id }: { id: string }) => {
+    console.log('[WS] task:delete received', id)
     tasks.value = tasks.value.filter(t => t.id !== id)
   })
 
@@ -356,6 +310,9 @@ export const useTaskStore = defineStore('task', () => {
     tasksByProject,
     isLoading,
     init,
+    setTasks,
+    clearData,
+    fetchTasks,
     createTask,
     updateTask,
     deleteTask,
@@ -367,7 +324,6 @@ export const useTaskStore = defineStore('task', () => {
     getChildTasks,
     getRequirementProgress,
     getEnabledPhaseTemplates,
-    buildTaskPhasesFromTemplates,
     getCurrentTaskPhase,
     getTaskPhaseProgress,
     getTaskStageLabel,

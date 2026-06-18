@@ -50,45 +50,50 @@ function closeProjectModal() {
   isProjectModalOpen.value = false
 }
 
-function handleProjectSave(projectData: Partial<Project>) {
+async function handleProjectSave(projectData: Partial<Project>) {
   if (!canManageProject.value) return
   if (project.value) {
-    projectStore.updateProject(project.value.id, projectData)
+    const updated = await projectStore.updateProject(project.value.id, projectData)
+    if (!updated) return
   }
   closeProjectModal()
 }
 
-function handleProjectDelete() {
+async function handleProjectDelete() {
   if (!canManageProject.value) return
   if (project.value) {
-    projectStore.deleteProject(project.value.id)
-    router.push('/kanban')
+    const success = await projectStore.deleteProject(project.value.id)
+    if (success) {
+      router.push('/kanban')
+    }
   }
 }
 
-function addPhaseTemplate() {
+async function addPhaseTemplate() {
   if (!canManageProject.value) return
   if (!project.value || !newPhaseName.value.trim()) return
-  projectStore.addPhaseTemplate(project.value.id, newPhaseName.value)
-  newPhaseName.value = ''
+  const template = await projectStore.addPhaseTemplate(project.value.id, newPhaseName.value)
+  if (template) {
+    newPhaseName.value = ''
+  }
 }
 
-function renamePhaseTemplate(templateId: string, name: string) {
+async function renamePhaseTemplate(templateId: string, name: string) {
   if (!canManageProject.value) return
   if (!project.value) return
-  projectStore.updatePhaseTemplate(project.value.id, templateId, { name })
+  await projectStore.updatePhaseTemplate(project.value.id, templateId, { name })
 }
 
-function togglePhaseTemplate(templateId: string, enabled: boolean) {
+async function togglePhaseTemplate(templateId: string, enabled: boolean) {
   if (!canManageProject.value) return
   if (!project.value) return
-  projectStore.updatePhaseTemplate(project.value.id, templateId, { enabled })
+  await projectStore.updatePhaseTemplate(project.value.id, templateId, { enabled })
 }
 
-function movePhaseTemplate(templateId: string, direction: 'up' | 'down') {
+async function movePhaseTemplate(templateId: string, direction: 'up' | 'down') {
   if (!canManageProject.value) return
   if (!project.value) return
-  projectStore.movePhaseTemplate(project.value.id, templateId, direction)
+  await projectStore.movePhaseTemplate(project.value.id, templateId, direction)
 }
 
 function goToKanban() {

@@ -127,6 +127,14 @@ watchEffect(() => {
   }
 })
 
+// 拉取最新任务数据（REST API 回退）
+watchEffect(() => {
+  const projectId = projectStore.currentProjectId
+  if (projectId) {
+    taskStore.fetchTasks(projectId)
+  }
+})
+
 const abandonedCount = computed(() => {
   const projectId = projectStore.currentProjectId
   const planningId = selectedPlanningId.value
@@ -416,11 +424,12 @@ function openChildTaskModal(requirementId: string) {
   isModalOpen.value = true
 }
 
-function handleSave(taskData: Partial<Task>) {
+async function handleSave(taskData: Partial<Task>) {
+  let saved: Task | null = null
   if (selectedTask.value) {
-    taskStore.updateTask(selectedTask.value.id, taskData, userStore.currentUser?.id)
+    saved = await taskStore.updateTask(selectedTask.value.id, taskData, userStore.currentUser?.id)
   } else {
-    taskStore.createTask({
+    saved = await taskStore.createTask({
       title: taskData.title || '',
       description: taskData.description || '',
       itemType: taskData.itemType || 'task',
@@ -438,11 +447,15 @@ function handleSave(taskData: Partial<Task>) {
       comments: taskData.comments || []
     })
   }
-  closeModal()
+
+  if (saved) {
+    closeModal()
+  }
 }
 
-function handleDelete(taskId: string) {
-  if (taskStore.deleteTask(taskId)) {
+async function handleDelete(taskId: string) {
+  const success = await taskStore.deleteTask(taskId)
+  if (success) {
     closeModal()
   }
 }

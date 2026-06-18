@@ -1,12 +1,26 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
-import { useUserStore } from '@/stores'
+import { ref, computed, onMounted } from 'vue'
+import { useUserStore, useMemberStore } from '@/stores'
 import { ROLES } from '@/types'
 import type { User, RoleType } from '@/types'
 
 const userStore = useUserStore()
+const memberStore = useMemberStore()
 
-const users = computed(() => userStore.getAllUsers())
+const users = ref<User[]>([])
+const isLoading = ref(true)
+const isSaving = ref(false)
+const errorMessage = ref('')
+
+async function loadUsers() {
+  isLoading.value = true
+  users.value = await userStore.getAllUsers()
+  memberStore.setMembers(users.value)
+  isLoading.value = false
+}
+
+onMounted(loadUsers)
+
 const selectedRole = ref<string>('')
 
 const filteredUsers = computed(() => {
@@ -30,6 +44,7 @@ const form = ref({
 
 function openNewUserModal() {
   selectedUser.value = null
+  errorMessage.value = ''
   form.value = {
     employeeId: '',
     password: '',
@@ -45,9 +60,10 @@ function openNewUserModal() {
 
 function openEditUserModal(user: User) {
   selectedUser.value = user
+  errorMessage.value = ''
   form.value = {
     employeeId: user.employeeId,
-    password: user.password,
+    password: '',
     name: user.name,
     phone: user.phone,
     email: user.email,
@@ -61,23 +77,51 @@ function openEditUserModal(user: User) {
 function closeModal() {
   isModalOpen.value = false
   selectedUser.value = null
+  errorMessage.value = ''
 }
 
-function handleSave() {
-  if (selectedUser.value) {
-    userStore.updateProfile({
-      ...form.value,
-      id: selectedUser.value.id
-    } as Partial<User>)
-  } else {
-    userStore.createUser(form.value)
+async function handleSave() {
+  errorMessage.value = ''
+  if (!selectedUser.value && !form.value.password) {
+    errorMessage.value = '请输入密码'
+    return
   }
+
+  isSaving.value = true
+  const payload = {
+    employeeId: form.value.employeeId,
+    name: form.value.name,
+    phone: form.value.phone,
+    email: form.value.email,
+    role: form.value.role,
+    avatar: form.value.avatar,
+    isAdmin: form.value.isAdmin,
+    ...(form.value.password ? { password: form.value.password } : {})
+  }
+
+  const saved = selectedUser.value
+    ? await userStore.updateUser(selectedUser.value.id, payload)
+    : await userStore.createUser({ ...payload, password: form.value.password })
+
+  isSaving.value = false
+
+  if (!saved) {
+    errorMessage.value = '保存失败，请稍后重试'
+    return
+  }
+
+  await loadUsers()
   closeModal()
 }
 
-function handleDelete(userId: string) {
+async function handleDelete(userId: string) {
   if (confirm('确定要删除该用户吗？')) {
-    userStore.deleteUser(userId)
+    const success = await userStore.deleteUser(userId)
+    if (!success) {
+      errorMessage.value = '删除失败，请稍后重试'
+      return
+    }
+    await loadUsers()
     closeModal()
   }
 }
@@ -240,14 +284,19 @@ function getRoleName(roleType: RoleType): string {
           <div v-if="form.avatar" class="avatar-preview">
             <img :src="form.avatar" alt="Avatar preview" />
           </div>
+          <div v-if="errorMessage" class="error-message">
+            {{ errorMessage }}
+          </div>
         </div>
         <div class="modal-footer">
-          <button v-if="selectedUser" class="btn btn-danger" @click="handleDelete(selectedUser.id)">
+          <button v-if="selectedUser" class="btn btn-danger" :disabled="isSaving" @click="handleDelete(selectedUser.id)">
             删除
           </button>
           <div class="spacer"></div>
-          <button class="btn btn-secondary" @click="closeModal">取消</button>
-          <button class="btn btn-primary" @click="handleSave">保存</button>
+          <button class="btn btn-secondary" :disabled="isSaving" @click="closeModal">取消</button>
+          <button class="btn btn-primary" :disabled="isSaving" @click="handleSave">
+            {{ isSaving ? '保存中...' : '保存' }}
+          </button>
         </div>
       </div>
     </div>
@@ -487,6 +536,15 @@ tr:hover td {
   border-radius: 50%;
   object-fit: cover;
   border: 2px solid var(--color-border);
+}
+
+.error-message {
+  padding: 10px;
+  background-color: var(--color-error-light);
+  color: var(--color-error);
+  border-radius: var(--radius-md);
+  font-size: 14px;
+  text-align: center;
 }
 
 .btn-sm {

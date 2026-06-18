@@ -79,7 +79,7 @@ watch([() => props.isOpen, () => props.task, () => props.initialParentRequiremen
       ? taskStore.tasks.find(t => t.id === props.initialParentRequirementId)
       : null
     const projectId = parentRequirement?.projectId || props.projectId || ''
-    const phases = taskStore.buildTaskPhasesFromTemplates(projectId)
+    // 服务端会在创建任务时自动生成阶段，客户端传递空数组
     form.value = {
       itemType: 'task',
       parentRequirementId: parentRequirement?.id || null,
@@ -90,7 +90,7 @@ watch([() => props.isOpen, () => props.task, () => props.initialParentRequiremen
       dueDate: '',
       assigneeId: null,
       stage: 'filed',
-      phases,
+      phases: [],
       currentPhaseId: null,
       planningId: props.initialPlanningId || null,
       references: [],
@@ -163,9 +163,8 @@ const currentDisplayAssignee = computed(() => {
 })
 
 function handleSubmit() {
-  const phases = isTaskItem.value && form.value.phases.length === 0
-    ? taskStore.buildTaskPhasesFromTemplates(form.value.projectId)
-    : normalizeTaskPhases(form.value.phases)
+  // 服务端会在创建任务时自动生成阶段
+  const phases = normalizeTaskPhases(form.value.phases)
   const taskData: Partial<Task> = isRequirementItem.value
     ? {
         ...form.value,
@@ -205,11 +204,8 @@ function handleItemTypeChange(itemType: TaskItemType) {
     form.value.dueDate = ''
     form.value.phases = []
     form.value.currentPhaseId = null
-  } else {
-    if (form.value.phases.length === 0) {
-      form.value.phases = taskStore.buildTaskPhasesFromTemplates(form.value.projectId)
-    }
   }
+  // 服务端会在创建任务时自动生成阶段
 }
 
 function addReference() {
@@ -225,11 +221,11 @@ function removeReference(index: number) {
 }
 
 function addComment() {
-  const currentUser = members.value[0]
-  if (currentUser) {
+  const authorId = userStore.currentUser?.id || members.value[0]?.id
+  if (authorId) {
     form.value.comments.push({
       id: Date.now().toString(),
-      authorId: currentUser.id,
+      authorId,
       content: '',
       createdAt: new Date().toISOString()
     })
@@ -248,10 +244,10 @@ function getMemberName(memberId: string): string {
 const taskHistories = ref<TaskHistory[]>([])
 const progressHistories = ref<TaskProgressHistory[]>([])
 
-function loadHistories() {
+async function loadHistories() {
   if (props.task?.id) {
-    taskHistories.value = taskStore.getTaskHistories(props.task.id)
-    progressHistories.value = taskStore.getTaskProgressHistories(props.task.id)
+    taskHistories.value = await taskStore.getTaskHistories(props.task.id)
+    progressHistories.value = await taskStore.getTaskProgressHistories(props.task.id)
   } else {
     taskHistories.value = []
     progressHistories.value = []
@@ -750,6 +746,7 @@ function getProgressDelta(history: TaskProgressHistory): string {
   max-height: 90vh;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
 }
 
 .modal-tabs {
@@ -757,6 +754,13 @@ function getProgressDelta(history: TaskProgressHistory): string {
   gap: 4px;
   padding: 0 24px;
   border-bottom: 1px solid var(--color-border);
+  flex-shrink: 0;
+}
+
+.modal-body {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
 }
 
 .tab {
@@ -1244,6 +1248,11 @@ function getProgressDelta(history: TaskProgressHistory): string {
   padding-top: 16px;
   border-top: 1px solid var(--color-border);
   margin-top: auto;
+  flex-shrink: 0;
+  position: sticky;
+  bottom: 0;
+  background-color: var(--color-bg-primary);
+  z-index: 1;
 }
 
 .btn:disabled {

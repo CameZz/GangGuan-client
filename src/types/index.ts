@@ -68,7 +68,6 @@ export interface Member {
 export interface User {
   id: string
   employeeId: string        // 工号
-  password: string         // 密码
   name: string             // 姓名
   phone: string            // 手机号
   email: string            // 邮箱
