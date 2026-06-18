@@ -14,6 +14,7 @@ import {
   isWorkday as isScheduleWorkday,
   WORK_SLOTS_PER_DAY
 } from '@/utils/workingSchedule'
+import TaskModal from '@/components/task/TaskModal.vue'
 
 const route = useRoute()
 const taskStore = useTaskStore()
@@ -33,6 +34,32 @@ const MEMBER_INFO_PADDING_X = 16
 const MEMBER_INFO_TOTAL_WIDTH = MEMBER_INFO_WIDTH + MEMBER_INFO_PADDING_X * 2 + 1
 const scheduleScrollBody = ref<HTMLElement | null>(null)
 const activeView = ref<'schedule' | 'progress'>('schedule')
+
+// Task modal
+const isModalOpen = ref(false)
+const selectedTask = ref<Task | null>(null)
+
+function openEditTaskModal(task: Task) {
+  selectedTask.value = task
+  isModalOpen.value = true
+}
+
+function closeModal() {
+  isModalOpen.value = false
+  selectedTask.value = null
+}
+
+async function handleSave(taskData: Partial<Task>) {
+  if (selectedTask.value) {
+    await taskStore.updateTask(selectedTask.value.id, taskData, userStore.currentUser?.id)
+  }
+  closeModal()
+}
+
+async function handleDelete(taskId: string) {
+  const success = await taskStore.deleteTask(taskId)
+  if (success) closeModal()
+}
 
 const filterRoles = ref<RoleType[]>([])
 
@@ -699,6 +726,7 @@ const activePlannings = computed(() => {
                 @mouseenter="showTooltip($event, item)"
                 @mouseleave="hideTooltip"
                 @mousemove="moveTooltip"
+                @click="openEditTaskModal(item.task)"
               >
                 <span class="bar-label">{{ item.task.title }}</span>
               </div>
@@ -836,6 +864,15 @@ const activePlannings = computed(() => {
         <div class="tooltip-row">优先级：{{ tooltipData.priority }}</div>
       </div>
     </Teleport>
+
+    <TaskModal
+      :is-open="isModalOpen"
+      :task="selectedTask"
+      :project-id="currentProjectId"
+      @close="closeModal"
+      @save="handleSave"
+      @delete="handleDelete"
+    />
   </div>
 </template>
 

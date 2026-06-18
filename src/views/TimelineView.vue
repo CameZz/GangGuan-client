@@ -14,6 +14,7 @@ import {
   isWorkday as isScheduleWorkday,
   WORK_SLOTS_PER_DAY
 } from '@/utils/workingSchedule'
+import TaskModal from '@/components/task/TaskModal.vue'
 
 const route = useRoute()
 const taskStore = useTaskStore()
@@ -32,6 +33,32 @@ const GRID_SLOT_WIDTH = 12.5
 const selectedProjectId = ref<string>('')
 const filterStage = ref<string>('')
 const filterPriority = ref<string>('')
+
+// Task modal
+const isModalOpen = ref(false)
+const selectedTask = ref<Task | null>(null)
+
+function openEditTaskModal(task: Task) {
+  selectedTask.value = task
+  isModalOpen.value = true
+}
+
+function closeModal() {
+  isModalOpen.value = false
+  selectedTask.value = null
+}
+
+async function handleSave(taskData: Partial<Task>) {
+  if (selectedTask.value) {
+    await taskStore.updateTask(selectedTask.value.id, taskData, userStore.currentUser?.id)
+  }
+  closeModal()
+}
+
+async function handleDelete(taskId: string) {
+  const success = await taskStore.deleteTask(taskId)
+  if (success) closeModal()
+}
 
 // Sync projectId from route
 watchEffect(() => {
@@ -475,6 +502,7 @@ const dayIndexToVisibleCol = computed(() => {
               class="phase-bar"
               :style="getPhaseBarStyle(phase, pIndex)"
               :title="getPhaseTooltip(task, phase)"
+              @click="openEditTaskModal(task)"
             >
               <span class="phase-progress-fill"></span>
               <span class="phase-assignee-dot"></span>
@@ -500,6 +528,16 @@ const dayIndexToVisibleCol = computed(() => {
         <span class="legend-label">{{ item.label }}</span>
       </div>
     </div>
+
+    <TaskModal
+      :is-open="isModalOpen"
+      :task="selectedTask"
+      :project-id="projectStore.currentProjectId || ''"
+      :initial-planning-id="selectedPlanningId"
+      @close="closeModal"
+      @save="handleSave"
+      @delete="handleDelete"
+    />
   </div>
 </template>
 
