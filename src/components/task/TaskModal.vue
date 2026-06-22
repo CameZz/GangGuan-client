@@ -4,7 +4,17 @@ import type { Task, TaskStatus, TaskPriority, TaskStage, TaskPhase, Reference, C
 import { HISTORY_FIELD_LABELS, ROLES } from '@/types'
 import { useMemberStore, usePlanningStore, useProjectStore, useTaskStore, useUserStore } from '@/stores'
 import { createTaskPhaseFromTemplate, getPhaseStatus, getTaskPhaseProgress, getTaskStageLabel, normalizeTaskPhases } from '@/utils/taskPhases'
-import { localDateTimeInputToIso, normalizePhaseDateTime, toLocalDateTimeInputValue, validatePhaseTimeRange } from '@/utils/workingSchedule'
+import {
+  formatDateLabel,
+  generateWorkSlots,
+  getWorkSlotGridRange,
+  isWorkday as isScheduleWorkday,
+  localDateTimeInputToIso,
+  normalizePhaseDateTime,
+  toLocalDateTimeInputValue,
+  validatePhaseTimeRange,
+  WORK_SLOTS_PER_DAY
+} from '@/utils/workingSchedule'
 import MemberAvatar from '@/components/member/MemberAvatar.vue'
 
 const props = defineProps<{
@@ -31,6 +41,8 @@ const userStore = useUserStore()
 const members = computed(() => memberStore.members)
 const plannings = computed(() => planningStore.plannings)
 
+const PREVIEW_DAYS = 15
+
 const form = ref({
   itemType: 'task' as TaskItemType,
   parentRequirementId: null as string | null,
@@ -53,6 +65,7 @@ const activeTab = ref<'main' | 'phases' | 'progressHistory' | 'children' | 'refe
 const deleteError = ref('')
 const scheduleError = ref('')
 const phaseTemplateToAdd = ref('')
+const selectedPhaseIndex = ref<number | null>(null)
 const editingCommentIndex = ref<number | null>(null)
 const newCommentContent = ref('')
 
@@ -107,6 +120,7 @@ watch([() => props.isOpen, () => props.task, () => props.initialParentRequiremen
     deleteError.value = ''
     scheduleError.value = ''
     phaseTemplateToAdd.value = ''
+    selectedPhaseIndex.value = null
     editingCommentIndex.value = null
     newCommentContent.value = ''
   }
@@ -160,6 +174,63 @@ const scheduleConfig = computed(() => {
 
 const phaseProgress = computed(() => getTaskPhaseProgress(form.value.phases))
 
+interface SchedulePreviewDay {
+  date: Date
+  dateStr: string
+  dayIndex: number
+}
+
+interface PhaseSchedulePreviewItem {
+  key: string
+  taskId: string
+  taskTitle: string
+  planningName: string
+  phase: TaskPhase
+  isDraft: boolean
+  isCurrentPhase: boolean
+}
+
+const schedulePreviewStart = computed(() => {
+  const today = new Date()
+  return new Date(today.getFullYear(), today.getMonth(), today.getDate())
+})
+
+const schedulePreviewEnd = computed(() => {
+  const end = new Date(schedulePreviewStart.value)
+  end.setDate(end.getDate() + PREVIEW_DAYS)
+  return end
+})
+
+const schedulePreviewDays = computed<SchedulePreviewDay[]>(() => {
+  const days: SchedulePreviewDay[] = []
+  const current = new Date(schedulePreviewStart.value)
+
+  for (let dayIndex = 0; dayIndex < PREVIEW_DAYS; dayIndex++) {
+    days.push({
+      date: new Date(current),
+      dateStr: formatDateLabel(current),
+      dayIndex
+    })
+    current.setDate(current.getDate() + 1)
+  }
+
+  return days
+})
+
+const visibleSchedulePreviewDays = computed(() => {
+  return schedulePreviewDays.value.filter(day => isScheduleWorkday(day.date, scheduleConfig.value))
+})
+
+const schedulePreviewWorkSlots = computed(() => generateWorkSlots(visibleSchedulePreviewDays.value, scheduleConfig.value))
+
+const schedulePreviewTotalSlots = computed(() => visibleSchedulePreviewDays.value.length * WORK_SLOTS_PER_DAY)
+
+const schedulePreviewGridTemplateColumns = computed(() => {
+  return schedulePreviewTotalSlots.value > 0
+    ? `repeat(${schedulePreviewTotalSlots.value}, minmax(0, 1fr))`
+    : '1fr'
+})
+
 const currentPhaseLabel = computed(() => getTaskStageLabel({
   phases: form.value.phases,
   stage: form.value.stage,
@@ -176,6 +247,105 @@ const currentDisplayPhase = computed(() => {
 const currentDisplayAssignee = computed(() => {
   return currentDisplayPhase.value ? getPhaseAssignee(currentDisplayPhase.value) : null
 })
+
+function getPlanningName(planningId: string | null): string {
+  if (!planningId) return '未分配迭代'
+  return plannings.value.find(planning => planning.id === planningId)?.name || '未知迭代'
+}
+
+function getPhaseEndTime(phase: TaskPhase): Date | null {
+  if (!phase.startTime || !phase.endTime) return null
+  const end = normalizePhaseDateTime(phase.endTime, 'end')
+  return end && !Number.isNaN(end.getTime()) ? end : null
+}
+
+function isPhaseInPreviewRange(phase: TaskPhase): boolean {
+  const start = normalizePhaseDateTime(phase.startTime, 'start')
+  const end = getPhaseEndTime(phase)
+  if (!start || !end) return false
+  return end.getTime() > schedulePreviewStart.value.getTime() &&
+    start.getTime() < schedulePreviewEnd.value.getTime() &&
+    getWorkSlotGridRange(phase.startTime, phase.endTime, schedulePreviewWorkSlots.value) !== null
+}
+
+function getPhaseSchedulePreviewItems(phaseIndex: number): PhaseSchedulePreviewItem[] {
+  const selectedPhase = form.value.phases[phaseIndex]
+  const assigneeId = selectedPhase?.assigneeId
+  if (!assigneeId) return []
+
+  const items: PhaseSchedulePreviewItem[] = []
+  const currentTaskId = props.task?.id || 'draft-task'
+
+  for (const task of taskStore.tasks) {
+    if (!taskStore.isTaskItem(task)) continue
+    if (task.projectId !== form.value.projectId) continue
+    if (props.task?.id && task.id === props.task.id) continue
+
+    for (const phase of task.phases || []) {
+      if (phase.assigneeId !== assigneeId || !isPhaseInPreviewRange(phase)) continue
+      items.push({
+        key: `saved-${task.id}-${phase.id}`,
+        taskId: task.id,
+        taskTitle: task.title,
+        planningName: getPlanningName(task.planningId),
+        phase,
+        isDraft: false,
+        isCurrentPhase: false
+      })
+    }
+  }
+
+  form.value.phases.forEach((phase, index) => {
+    if (phase.assigneeId !== assigneeId || !isPhaseInPreviewRange(phase)) return
+    items.push({
+      key: `draft-${currentTaskId}-${phase.id}-${index}`,
+      taskId: currentTaskId,
+      taskTitle: form.value.title || '当前任务',
+      planningName: getPlanningName(form.value.planningId),
+      phase,
+      isDraft: true,
+      isCurrentPhase: index === phaseIndex
+    })
+  })
+
+  return items.sort((a, b) => {
+    const aStart = a.phase.startTime ? new Date(a.phase.startTime).getTime() : Number.MAX_SAFE_INTEGER
+    const bStart = b.phase.startTime ? new Date(b.phase.startTime).getTime() : Number.MAX_SAFE_INTEGER
+    return aStart - bStart
+  })
+}
+
+function isSchedulePreviewVisible(phaseIndex: number): boolean {
+  return selectedPhaseIndex.value === phaseIndex && !!form.value.phases[phaseIndex]?.assigneeId
+}
+
+function getSchedulePreviewBarStyle(item: PhaseSchedulePreviewItem) {
+  const range = getWorkSlotGridRange(item.phase.startTime, item.phase.endTime, schedulePreviewWorkSlots.value)
+  if (!range) return { display: 'none' }
+  return {
+    gridColumn: `${range.start} / ${range.end}`
+  }
+}
+
+function formatPhasePreviewDateTime(value: string | null): string {
+  if (!value) return '-'
+  return new Date(value).toLocaleString('zh-CN', {
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit'
+  })
+}
+
+function getSchedulePreviewTooltip(item: PhaseSchedulePreviewItem): string {
+  return [
+    `任务：${item.taskTitle}`,
+    `阶段：${item.phase.name}`,
+    `迭代：${item.planningName}`,
+    `时间：${formatPhasePreviewDateTime(item.phase.startTime)} - ${formatPhasePreviewDateTime(item.phase.endTime)}`,
+    `进度：${item.phase.progress}%`
+  ].join('\n')
+}
 
 function snapIsoToHalfHour(isoValue: string | null): string | null {
   if (!isoValue) return null
@@ -251,6 +421,7 @@ function handleItemTypeChange(itemType: TaskItemType) {
     form.value.dueDate = ''
     form.value.phases = []
     form.value.currentPhaseId = null
+    selectedPhaseIndex.value = null
   }
   // 服务端会在创建任务时自动生成阶段
 }
@@ -321,11 +492,17 @@ function addTaskPhase() {
   const template = phaseTemplates.value.find(item => item.id === phaseTemplateToAdd.value)
   if (!template) return
   form.value.phases.push(createTaskPhaseFromTemplate(template, form.value.phases.length))
+  selectedPhaseIndex.value = form.value.phases.length - 1
   phaseTemplateToAdd.value = ''
 }
 
 function removeTaskPhase(index: number) {
   form.value.phases.splice(index, 1)
+  if (selectedPhaseIndex.value === index) {
+    selectedPhaseIndex.value = null
+  } else if (selectedPhaseIndex.value !== null && selectedPhaseIndex.value > index) {
+    selectedPhaseIndex.value--
+  }
   reorderTaskPhases()
 }
 
@@ -334,6 +511,11 @@ function moveTaskPhase(index: number, direction: 'up' | 'down') {
   if (targetIndex < 0 || targetIndex >= form.value.phases.length) return
   const [phase] = form.value.phases.splice(index, 1)
   form.value.phases.splice(targetIndex, 0, phase)
+  if (selectedPhaseIndex.value === index) {
+    selectedPhaseIndex.value = targetIndex
+  } else if (selectedPhaseIndex.value === targetIndex) {
+    selectedPhaseIndex.value = index
+  }
   reorderTaskPhases()
 }
 
@@ -342,6 +524,7 @@ function reorderTaskPhases() {
 }
 
 function updateTaskPhaseAssignee(index: number, assigneeId: string) {
+  selectedPhaseIndex.value = index
   form.value.phases[index].assigneeId = assigneeId || null
 }
 
@@ -372,14 +555,17 @@ function snapToHalfHour(dateTimeValue: string): string {
 }
 
 function updateTaskPhaseStartTime(index: number, dateTimeValue: string) {
+  selectedPhaseIndex.value = index
   form.value.phases[index].startTime = localDateTimeInputToIso(snapToHalfHour(dateTimeValue))
 }
 
 function updateTaskPhaseEndTime(index: number, dateTimeValue: string) {
+  selectedPhaseIndex.value = index
   form.value.phases[index].endTime = localDateTimeInputToIso(snapToHalfHour(dateTimeValue))
 }
 
 function handlePhaseStartFocus(index: number, e: FocusEvent) {
+  selectedPhaseIndex.value = index
   const input = e.target as HTMLInputElement
   if (!input.value) {
     const today = new Date()
@@ -392,6 +578,7 @@ function handlePhaseStartFocus(index: number, e: FocusEvent) {
 }
 
 function handlePhaseEndFocus(index: number, e: FocusEvent) {
+  selectedPhaseIndex.value = index
   const input = e.target as HTMLInputElement
   if (!input.value) {
     const today = new Date()
@@ -439,7 +626,7 @@ function getProgressDelta(history: TaskProgressHistory): string {
 </script>
 
 <template>
-  <div v-if="isOpen" class="modal-overlay" @click.self="emit('close')">
+  <div v-if="isOpen" class="modal-overlay">
     <div class="modal modal-lg">
       <div class="modal-header">
         <div class="modal-title-row">
@@ -588,6 +775,8 @@ function getProgressDelta(history: TaskProgressHistory): string {
                   v-for="(phase, index) in form.phases"
                   :key="phase.id"
                   class="phase-plan-row"
+                  :class="{ selected: selectedPhaseIndex === index }"
+                  @click="selectedPhaseIndex = index"
                 >
                   <div class="phase-order">{{ index + 1 }}</div>
                   <div class="phase-main">
@@ -597,6 +786,7 @@ function getProgressDelta(history: TaskProgressHistory): string {
                   <select
                     :value="phase.assigneeId || ''"
                     class="input select phase-assignee-select"
+                    @focus="selectedPhaseIndex = index"
                     @change="updateTaskPhaseAssignee(index, ($event.target as HTMLSelectElement).value)"
                   >
                     <option value="">选择执行者</option>
@@ -631,7 +821,7 @@ function getProgressDelta(history: TaskProgressHistory): string {
                       :disabled="index === 0"
                       title="上移"
                       aria-label="上移阶段"
-                      @click="moveTaskPhase(index, 'up')"
+                      @click.stop="moveTaskPhase(index, 'up')"
                     >
                       <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <path d="M12 19V5M5 12l7-7 7 7" />
@@ -642,7 +832,7 @@ function getProgressDelta(history: TaskProgressHistory): string {
                       :disabled="index === form.phases.length - 1"
                       title="下移"
                       aria-label="下移阶段"
-                      @click="moveTaskPhase(index, 'down')"
+                      @click.stop="moveTaskPhase(index, 'down')"
                     >
                       <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <path d="M12 5v14M19 12l-7 7-7-7" />
@@ -652,12 +842,57 @@ function getProgressDelta(history: TaskProgressHistory): string {
                       class="btn btn-ghost phase-icon-button danger"
                       title="删除"
                       aria-label="删除阶段"
-                      @click="removeTaskPhase(index)"
+                      @click.stop="removeTaskPhase(index)"
                     >
                       <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14" />
                       </svg>
                     </button>
+                  </div>
+                  <div v-if="isSchedulePreviewVisible(index)" class="phase-schedule-preview">
+                    <template v-if="getPhaseSchedulePreviewItems(index).length > 0">
+                      <div class="phase-schedule-scroll">
+                        <div
+                          class="phase-schedule-dates"
+                          :style="{
+                            gridTemplateColumns: schedulePreviewGridTemplateColumns
+                          }"
+                        >
+                          <div
+                            v-for="(day, dayIndex) in visibleSchedulePreviewDays"
+                            :key="day.dayIndex"
+                            class="phase-schedule-date"
+                            :style="{ gridColumn: `${dayIndex * WORK_SLOTS_PER_DAY + 1} / ${(dayIndex + 1) * WORK_SLOTS_PER_DAY + 1}` }"
+                          >
+                            {{ day.dateStr }}
+                          </div>
+                        </div>
+                        <div
+                          class="phase-schedule-grid"
+                          :style="{
+                            gridTemplateColumns: schedulePreviewGridTemplateColumns
+                          }"
+                        >
+                          <div
+                            v-for="(day, dayIndex) in visibleSchedulePreviewDays"
+                            :key="`cell-${day.dayIndex}`"
+                            class="phase-schedule-cell"
+                            :style="{ gridColumn: `${dayIndex * WORK_SLOTS_PER_DAY + 1} / ${(dayIndex + 1) * WORK_SLOTS_PER_DAY + 1}` }"
+                          ></div>
+                          <div
+                            v-for="item in getPhaseSchedulePreviewItems(index)"
+                            :key="item.key"
+                            class="phase-schedule-bar"
+                            :class="{ draft: item.isDraft, current: item.isCurrentPhase }"
+                            :style="getSchedulePreviewBarStyle(item)"
+                            :title="getSchedulePreviewTooltip(item)"
+                          >
+                            <span class="phase-schedule-bar-label">{{ item.taskTitle }} / {{ item.phase.name }}</span>
+                          </div>
+                        </div>
+                      </div>
+                    </template>
+                    <div v-else class="phase-schedule-empty">未来两周暂无排期</div>
                   </div>
                 </div>
                 <div v-if="form.phases.length === 0" class="phase-empty">暂无阶段</div>
@@ -1034,6 +1269,14 @@ function getProgressDelta(history: TaskProgressHistory): string {
   border: 1px solid var(--color-border);
   border-radius: var(--radius-sm);
   background-color: var(--color-bg-primary);
+  transition: border-color var(--transition-fast), background-color var(--transition-fast), box-shadow var(--transition-fast);
+  cursor: pointer;
+}
+
+.phase-plan-row.selected {
+  border-color: var(--color-primary);
+  background-color: color-mix(in srgb, var(--color-primary) 6%, var(--color-bg-primary));
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-primary) 18%, transparent);
 }
 
 .phase-order {
@@ -1104,6 +1347,102 @@ function getProgressDelta(history: TaskProgressHistory): string {
 }
 
 .time-separator {
+  color: var(--color-text-muted);
+  font-size: 12px;
+  text-align: center;
+}
+
+.phase-schedule-preview {
+  grid-column: 1 / -1;
+  min-width: 0;
+  margin-top: 2px;
+  padding: 8px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background-color: var(--color-bg-secondary);
+}
+
+.phase-schedule-scroll {
+  overflow-x: hidden;
+  overflow-y: hidden;
+}
+
+.phase-schedule-dates,
+.phase-schedule-grid {
+  display: grid;
+}
+
+.phase-schedule-date {
+  min-width: 0;
+  padding: 2px 1px 4px;
+  border-right: 1px solid var(--color-border);
+  color: var(--color-text-muted);
+  font-size: 9px;
+  line-height: 1.2;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: clip;
+}
+
+.phase-schedule-grid {
+  position: relative;
+  grid-template-rows: 30px;
+  align-items: center;
+  min-height: 34px;
+}
+
+.phase-schedule-cell {
+  grid-row: 1;
+  min-height: 30px;
+  border-right: 1px solid var(--color-border);
+  background-color: var(--color-bg-primary);
+}
+
+.phase-schedule-cell:nth-child(odd) {
+  background-color: var(--color-bg-tertiary);
+}
+
+.phase-schedule-bar {
+  grid-row: 1;
+  z-index: 1;
+  min-width: 0;
+  height: 22px;
+  margin: 4px 1px;
+  padding: 0 3px;
+  border-radius: var(--radius-sm);
+  border: 1px solid #0f766e;
+  background-color: #14b8a6;
+  color: #fff;
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+  font-size: 10px;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.phase-schedule-bar.draft {
+  border-color: #2563eb;
+  background-color: #3b82f6;
+}
+
+.phase-schedule-bar.current {
+  border-color: #f59e0b;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.6);
+}
+
+.phase-schedule-bar-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.phase-schedule-empty {
+  padding: 8px 10px;
+  border: 1px dashed var(--color-border);
+  border-radius: var(--radius-sm);
+  background-color: var(--color-bg-primary);
   color: var(--color-text-muted);
   font-size: 12px;
   text-align: center;

@@ -8,9 +8,9 @@ const userStore = useUserStore()
 const projectStore = useProjectStore()
 
 const isLoggedIn = computed(() => userStore.isLoggedIn)
-const isAdmin = computed(() => userStore.isAdmin)
-const isProjectManager = computed(() => userStore.isProjectManager)
 const currentUser = computed(() => userStore.currentUser)
+const isAdmin = computed(() => currentUser.value?.isAdmin === true)
+const isProjectManager = computed(() => userStore.isProjectManager)
 const currentProject = computed(() => projectStore.currentProject)
 const selectedPlanningId = computed(() => projectStore.selectedPlanningId)
 
@@ -53,8 +53,8 @@ function getProjectDetailLink(): string {
         <router-link :to="getNavLink('/kanban')" class="nav-link">看板</router-link>
         <router-link :to="getNavLink('/list')" class="nav-link">列表</router-link>
         <router-link :to="getNavLink('/timeline')" class="nav-link">时间轴</router-link>
-        <router-link :to="getNavLink('/member-schedule')" class="nav-link">成员排期</router-link>
         <router-link :to="getNavLink('/members')" class="nav-link">成员</router-link>
+        <router-link :to="getNavLink('/member-schedule')" class="nav-link">成员排期</router-link>
         <router-link v-if="isProjectManager" :to="getProjectDetailLink()" class="nav-link">项目详情</router-link>
         <router-link v-if="isAdmin" to="/admin" class="nav-link">管理</router-link>
       </nav>

@@ -550,7 +550,7 @@ const dayIndexToVisibleCol = computed(() => {
 })
 
 const visibleGridWidth = computed(() => `${visibleTotalSlots.value * GRID_SLOT_WIDTH}px`)
-const progressGridWidth = computed(() => `${visibleDaySlots.value.length * GRID_SLOT_WIDTH * 2}px`)
+const progressGridWidth = computed(() => `${visibleDaySlots.value.length * GRID_SLOT_WIDTH * WORK_SLOTS_PER_DAY}px`)
 
 const hasAutoScrolledToToday = ref(false)
 const todayKey = formatDateKey(now)
@@ -748,7 +748,7 @@ const activePlannings = computed(() => {
             <div
               class="schedule-grid-header"
               :style="{
-                gridTemplateColumns: `repeat(${visibleDaySlots.length}, ${GRID_SLOT_WIDTH * 2}px)`,
+                gridTemplateColumns: `repeat(${visibleDaySlots.length}, ${GRID_SLOT_WIDTH * WORK_SLOTS_PER_DAY}px)`,
                 minWidth: progressGridWidth
               }"
             >
@@ -781,7 +781,7 @@ const activePlannings = computed(() => {
 
             <div
               class="progress-grid"
-              :style="{ gridTemplateColumns: `repeat(${visibleDaySlots.length}, ${GRID_SLOT_WIDTH * 2}px)`, minWidth: progressGridWidth }"
+              :style="{ gridTemplateColumns: `repeat(${visibleDaySlots.length}, ${GRID_SLOT_WIDTH * WORK_SLOTS_PER_DAY}px)`, minWidth: progressGridWidth }"
             >
               <div
                 v-for="(cell, index) in memberData.cells"
@@ -795,8 +795,15 @@ const activePlannings = computed(() => {
                   :class="{ negative: cell.netDelta < 0 }"
                   @click="selectProgressCell(cell)"
                 >
-                  <span class="progress-cell-count">{{ cell.count }}次</span>
-                  <span class="progress-cell-delta">{{ formatSignedDelta(cell.netDelta) }}</span>
+                  <div class="progress-cell-details">
+                    <div v-for="detail in cell.details" :key="detail.id" class="progress-cell-detail-item">
+                      <span class="detail-task">{{ detail.taskTitle }}</span>
+                      <span class="detail-sep">-</span>
+                      <span class="detail-phase">{{ detail.phaseName }}</span>
+                      <span class="detail-sep">-</span>
+                      <span class="detail-change">{{ detail.oldProgress }}%→{{ detail.newProgress }}%</span>
+                    </div>
+                  </div>
                 </button>
               </div>
             </div>
@@ -1208,15 +1215,15 @@ const activePlannings = computed(() => {
 .progress-grid {
   display: grid;
   position: relative;
-  min-height: 56px;
+  min-height: 80px;
 }
 
 .progress-cell {
   display: flex;
-  align-items: center;
+  align-items: stretch;
   justify-content: center;
-  min-height: 56px;
-  padding: 6px;
+  min-height: 80px;
+  padding: 4px;
   border-right: 1px solid var(--color-border);
   border-left: 1px solid transparent;
 }
@@ -1229,17 +1236,17 @@ const activePlannings = computed(() => {
 .progress-cell-button {
   display: flex;
   width: 100%;
-  min-height: 36px;
   flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 2px;
+  align-items: stretch;
+  gap: 4px;
+  padding: 4px 6px;
   border: 1px solid #bbf7d0;
   border-radius: var(--radius-sm);
   background-color: #dcfce7;
   color: #15803d;
   cursor: pointer;
   transition: all var(--transition-fast);
+  overflow: hidden;
 }
 
 .progress-cell-button:hover {
@@ -1253,16 +1260,45 @@ const activePlannings = computed(() => {
   color: #b91c1c;
 }
 
-.progress-cell-count {
-  font-size: 12px;
-  font-weight: 700;
-  line-height: 1;
+
+.progress-cell-details {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
 }
 
-.progress-cell-delta {
-  font-size: 11px;
-  font-weight: 700;
-  line-height: 1;
+.progress-cell-detail-item {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  font-size: 10px;
+  line-height: 1.3;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.detail-task {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex-shrink: 1;
+  min-width: 0;
+}
+
+.detail-sep {
+  flex-shrink: 0;
+  opacity: 0.5;
+}
+
+.detail-phase {
+  flex-shrink: 0;
+}
+
+.detail-change {
+  flex-shrink: 0;
+  font-weight: 600;
 }
 
 .progress-detail-panel {

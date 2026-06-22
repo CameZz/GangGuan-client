@@ -40,7 +40,9 @@ export const usePlanningStore = defineStore('planning', () => {
       const result = unwrapApiData<{ planning: Planning }>(await planningApi.create(projectId, data) as any)
       if (result?.planning) {
         const planning = result.planning
-        plannings.value.push(planning)
+        if (!plannings.value.find(p => p.id === planning.id)) {
+          plannings.value.push(planning)
+        }
         return planning
       }
       return null

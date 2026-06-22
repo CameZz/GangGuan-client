@@ -11,6 +11,14 @@ import { wsService } from '@/utils/websocket'
 type UserCreateInput = Omit<User, 'id'> & { password: string }
 type UserUpdateInput = Partial<Omit<User, 'id'>> & { password?: string }
 
+function normalizeUser(user: User): User {
+  const rawIsAdmin = user.isAdmin as unknown
+  return {
+    ...user,
+    isAdmin: rawIsAdmin === true || rawIsAdmin === 'true' || rawIsAdmin === 1
+  }
+}
+
 export const useUserStore = defineStore('user', () => {
   const currentUser = ref<User | null>(null)
   const isLoading = ref(false)
@@ -18,7 +26,7 @@ export const useUserStore = defineStore('user', () => {
   let initPromise: Promise<void> | null = null
 
   const isLoggedIn = computed(() => !!currentUser.value)
-  const isAdmin = computed(() => currentUser.value?.isAdmin ?? false)
+  const isAdmin = computed(() => currentUser.value?.isAdmin === true)
   const isProjectManager = computed(() => isAdmin.value || currentUser.value?.role === 'pm')
 
   async function init(force = false): Promise<void> {
@@ -29,7 +37,7 @@ export const useUserStore = defineStore('user', () => {
       isLoading.value = true
       try {
         const data = unwrapApiData<{ user: User }>(await authApi.me() as any)
-        currentUser.value = data?.user || null
+        currentUser.value = data?.user ? normalizeUser(data.user) : null
       } catch {
         currentUser.value = null
       } finally {
@@ -47,7 +55,7 @@ export const useUserStore = defineStore('user', () => {
     try {
       const data = unwrapApiData<{ user: User }>(await authApi.login(employeeId, password) as any)
       if (data?.user) {
-        currentUser.value = data.user
+        currentUser.value = normalizeUser(data.user)
         hasInitialized.value = true
         return true
       }
@@ -77,7 +85,7 @@ export const useUserStore = defineStore('user', () => {
       const result = unwrapApiData<{ user: User }>(await userApi.update(id, data) as any)
       if (result?.user) {
         if (currentUser.value.id === id) {
-          currentUser.value = result.user
+          currentUser.value = normalizeUser(result.user)
         }
         return result.user
       }
@@ -139,7 +147,7 @@ export const useUserStore = defineStore('user', () => {
 
   wsService.on('user:update', (user: User) => {
     if (currentUser.value?.id === user.id) {
-      currentUser.value = user
+      currentUser.value = normalizeUser(user)
     }
   })
 

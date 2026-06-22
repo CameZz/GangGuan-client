@@ -7,8 +7,11 @@ import AppSidebar from '@/components/layout/AppSidebar.vue'
 const route = useRoute()
 const hideSidebarRoutes = ['/projects', '/login', '/admin']
 const hideSidebarRouteNames = ['ProjectDetail']
+const hideSidebarPrefixes = ['/member-schedule']
 const showSidebar = computed(() => {
-  return !hideSidebarRoutes.includes(route.path) && !hideSidebarRouteNames.includes(String(route.name))
+  return !hideSidebarRoutes.includes(route.path)
+    && !hideSidebarRouteNames.includes(String(route.name))
+    && !hideSidebarPrefixes.some(prefix => route.path.startsWith(prefix))
 })
 const showHeader = computed(() => route.path !== '/projects' && route.path !== '/login')
 </script>
