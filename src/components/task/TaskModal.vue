@@ -23,6 +23,14 @@ const props = defineProps<{
   projectId?: string
   initialParentRequirementId?: string | null
   initialPlanningId?: string | null
+  initialRequest?: {
+    title: string
+    description: string
+    phases: TaskPhase[]
+    projectId: string
+    planningId?: string | null
+    parentRequirementId?: string | null
+  } | null
 }>()
 
 const emit = defineEmits<{
@@ -68,8 +76,10 @@ const phaseTemplateToAdd = ref('')
 const selectedPhaseIndex = ref<number | null>(null)
 const editingCommentIndex = ref<number | null>(null)
 const newCommentContent = ref('')
+const taskHistories = ref<TaskHistory[]>([])
+const progressHistories = ref<TaskProgressHistory[]>([])
 
-watch([() => props.isOpen, () => props.task, () => props.initialParentRequirementId, () => props.initialPlanningId], ([open]) => {
+watch([() => props.isOpen, () => props.task, () => props.initialParentRequirementId, () => props.initialPlanningId, () => props.initialRequest], ([open]) => {
   if (open && props.task) {
     loadHistories()
     form.value = {
@@ -88,6 +98,27 @@ watch([() => props.isOpen, () => props.task, () => props.initialParentRequiremen
       references: [...(props.task.references || [])],
       comments: [...(props.task.comments || [])],
       projectId: props.task.projectId
+    }
+  } else if (open && props.initialRequest) {
+    // 从申请数据预填
+    taskHistories.value = []
+    progressHistories.value = []
+    form.value = {
+      itemType: 'task',
+      parentRequirementId: props.initialRequest.parentRequirementId || null,
+      title: props.initialRequest.title,
+      description: props.initialRequest.description,
+      status: 'todo',
+      priority: 'medium',
+      dueDate: '',
+      assigneeId: null,
+      stage: 'filed',
+      phases: normalizeTaskPhases(props.initialRequest.phases),
+      currentPhaseId: null,
+      planningId: props.initialRequest.planningId || null,
+      references: [],
+      comments: [],
+      projectId: props.initialRequest.projectId
     }
   } else if (open) {
     taskHistories.value = []
@@ -124,7 +155,7 @@ watch([() => props.isOpen, () => props.task, () => props.initialParentRequiremen
     editingCommentIndex.value = null
     newCommentContent.value = ''
   }
-})
+}, { immediate: true })
 
 const isEditing = computed(() => !!props.task)
 const isRequirementItem = computed(() => form.value.itemType === 'requirement')
@@ -476,9 +507,6 @@ function getMemberName(memberId: string): string {
   const member = members.value.find(m => m.id === memberId)
   return member?.name || '未分配'
 }
-
-const taskHistories = ref<TaskHistory[]>([])
-const progressHistories = ref<TaskProgressHistory[]>([])
 
 async function loadHistories() {
   if (props.task?.id) {

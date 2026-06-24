@@ -23,14 +23,20 @@ const NOTIFICATION_TYPE_LABELS: Record<NotificationType, string> = {
   progress_update: '进度更新提醒',
   behind_progress: '进度落后提醒',
   comment: '评论通知',
-  reference: '参考资源通知'
+  reference: '参考资源通知',
+  approval_submitted: '新任务申请',
+  approval_approved: '申请已通过',
+  approval_rejected: '申请已驳回'
 }
 
 const NOTIFICATION_TYPE_ICONS: Record<NotificationType, string> = {
   progress_update: '📊',
   behind_progress: '⚠️',
   comment: '💬',
-  reference: '📎'
+  reference: '📎',
+  approval_submitted: '📝',
+  approval_approved: '✅',
+  approval_rejected: '❌'
 }
 
 function getTypeLabel(type: NotificationType): string {
@@ -64,10 +70,19 @@ const NOTIFICATION_ROUTE_MAP: Record<string, string> = {
   behind_progress: 'member-schedule'
 }
 
+// 审批相关通知类型
+const APPROVAL_NOTIFICATION_TYPES = ['approval_submitted', 'approval_approved', 'approval_rejected']
+
 async function handleClickNotification(notification: Notification) {
   // Mark as read if unread
   if (!notification.readAt) {
     await notificationStore.markRead(notification.id)
+  }
+
+  // 审批相关通知 → 跳转到审批中心
+  if (APPROVAL_NOTIFICATION_TYPES.includes(notification.type)) {
+    router.push('/approvals')
+    return
   }
 
   // Navigate to related context
@@ -267,7 +282,7 @@ onMounted(() => {
 .message-list {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 6px;
 }
 
 .message-item {
@@ -278,16 +293,27 @@ onMounted(() => {
   background: var(--color-bg-primary);
   border-radius: var(--radius-md);
   cursor: pointer;
-  transition: all var(--transition-fast);
+  box-shadow: inset 0 0 0 1px transparent;
+  transition: background-color var(--transition-fast), box-shadow var(--transition-fast), transform var(--transition-fast);
 }
 
 .message-item:hover {
-  background: var(--color-bg-secondary);
+  background: color-mix(in srgb, var(--color-primary) 7%, var(--color-bg-primary));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-primary) 28%, transparent), var(--shadow-sm);
+  transform: translateY(-1px);
 }
 
 .message-item.unread {
   background: color-mix(in srgb, var(--color-primary) 5%, var(--color-bg-primary));
   border-left: 3px solid var(--color-primary);
+}
+
+.message-item.unread:hover {
+  background: color-mix(in srgb, var(--color-primary) 12%, var(--color-bg-primary));
+}
+
+.message-item:hover .message-icon {
+  background: color-mix(in srgb, var(--color-primary) 12%, var(--color-bg-tertiary));
 }
 
 .message-icon {

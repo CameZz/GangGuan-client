@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useRouter } from 'vue-router'
-import { useUserStore, useProjectStore, useNotificationStore, storesManager } from '@/stores'
+import { useUserStore, useProjectStore, useNotificationStore, useApprovalStore, storesManager } from '@/stores'
 
 const router = useRouter()
 const userStore = useUserStore()
 const projectStore = useProjectStore()
 const notificationStore = useNotificationStore()
+const approvalStore = useApprovalStore()
 
 const isLoggedIn = computed(() => userStore.isLoggedIn)
 const currentUser = computed(() => userStore.currentUser)
@@ -15,6 +16,7 @@ const isProjectManager = computed(() => userStore.isProjectManager)
 const currentProject = computed(() => projectStore.currentProject)
 const selectedPlanningId = computed(() => projectStore.selectedPlanningId)
 const unreadCount = computed(() => notificationStore.unreadCount)
+const pendingApprovalCount = computed(() => approvalStore.pendingCount)
 
 async function handleLogout() {
   await storesManager.logout()
@@ -69,6 +71,13 @@ function getProjectDetailLink(): string {
             <path d="M13.73 21a2 2 0 0 1-3.46 0" />
           </svg>
           <span v-if="unreadCount > 0" class="unread-badge">{{ unreadCount > 99 ? '99+' : unreadCount }}</span>
+        </router-link>
+        <router-link v-if="isProjectManager" to="/approvals" class="message-center-btn" title="审批中心">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M9 11l3 3L22 4" />
+            <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" />
+          </svg>
+          <span v-if="pendingApprovalCount > 0" class="unread-badge approval-badge">{{ pendingApprovalCount > 99 ? '99+' : pendingApprovalCount }}</span>
         </router-link>
         <router-link to="/profile" class="user-info">
           <img :src="currentUser?.avatar" :alt="currentUser?.name" class="user-avatar" />

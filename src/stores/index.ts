@@ -7,6 +7,7 @@ import { useTaskStore } from "./task";
 import { usePlanningStore } from "./planning";
 import { useUserStore } from "./user";
 import { useNotificationStore } from "./notification";
+import { useApprovalStore } from "./approval";
 import { wsService } from "@/utils/websocket";
 import { getWebSocketUrl, loadAppConfig } from "@/utils/config";
 
@@ -20,6 +21,7 @@ export {
     usePlanningStore,
     useUserStore,
     useNotificationStore,
+    useApprovalStore,
 };
 
 // Initialize all stores with API data
@@ -30,6 +32,7 @@ class StoresManager {
     public planningStore: any = null;
     public userStore: any = null;
     public notificationStore: any = null;
+    public approvalStore: any = null;
     public isReady = false;
     public isDataReady = false;
     private initPromise: Promise<void> | null = null;
@@ -47,6 +50,7 @@ class StoresManager {
         this.planningStore = usePlanningStore();
         this.userStore = useUserStore();
         this.notificationStore = useNotificationStore();
+        this.approvalStore = useApprovalStore();
     }
 
     async init(force = false) {
@@ -102,6 +106,11 @@ class StoresManager {
             // 获取通知未读数
             this.notificationStore?.fetchUnreadCount?.();
 
+            // 获取待审批数量（仅 PM/管理员）
+            if (this.userStore?.isProjectManager) {
+                this.approvalStore?.fetchApprovals?.({ status: 'pending' });
+            }
+
             // 页面可见性变化时，通过 REST API 补拉最新任务数据
             this.visibilityHandler = () => {
                 if (document.visibilityState === 'visible') {
@@ -130,6 +139,7 @@ class StoresManager {
         this.taskStore?.clearData?.();
         this.planningStore?.clearData?.();
         this.notificationStore?.clearData?.();
+        this.approvalStore?.clearData?.();
         this.connectedUserId = null;
         this.isDataReady = false;
     }

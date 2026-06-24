@@ -184,8 +184,38 @@ export interface Task {
   comments: Comment[]
 }
 
+// Approval request types
+export type ApprovalStatus = 'pending' | 'approved' | 'rejected'
+
+export interface PhaseSnapshotItem {
+  name: string
+  assigneeId: string | null
+}
+
+export interface TaskApprovalRequest {
+  id: string
+  title: string
+  remark: string
+  phaseSnapshot: PhaseSnapshotItem[]
+  status: ApprovalStatus
+  reviewComment: string | null
+  reviewedAt: string | null
+  createdAt: string
+  updatedAt: string
+  projectId: string
+  planningId: string | null
+  parentRequirementId: string | null
+  requesterId: string
+  reviewerId: string | null
+  // 关联数据（API 返回时包含）
+  requester?: { id: string; name: string; avatar: string; role: RoleType }
+  reviewer?: { id: string; name: string; avatar: string; role: RoleType } | null
+  project?: { id: string; name: string }
+  planning?: { id: string; name: string; color: string | null } | null
+}
+
 // Notification types
-export type NotificationType = 'progress_update' | 'behind_progress' | 'comment' | 'reference'
+export type NotificationType = 'progress_update' | 'behind_progress' | 'comment' | 'reference' | 'approval_submitted' | 'approval_approved' | 'approval_rejected'
 
 export interface Notification {
   id: string
@@ -212,6 +242,7 @@ export type WSMessageType =
   | 'user:login' | 'user:logout' | 'user:create' | 'user:update' | 'user:delete'
   | 'sync:init' | 'sync:update'
   | 'notification:create' | 'notification:update' | 'notification:read-all'
+  | 'approval:create' | 'approval:update'
 
 export interface WSMessage {
   type: WSMessageType

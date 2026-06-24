@@ -2,9 +2,10 @@
 import { ref, computed, watchEffect, watch, nextTick, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import type { Task, TaskStage, TaskStatus, TaskPriority } from '@/types'
-import { useTaskStore, useProjectStore, useUserStore, usePlanningStore } from '@/stores'
+import { useTaskStore, useProjectStore, useUserStore, usePlanningStore, useApprovalStore } from '@/stores'
 import TaskCard from '@/components/task/TaskCard.vue'
 import TaskModal from '@/components/task/TaskModal.vue'
+import TaskRequestModal from '@/components/task/TaskRequestModal.vue'
 import TaskFilter from '@/components/task/TaskFilter.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
 import { buildTaskScheduleExport, copyTextToClipboard } from '@/utils/taskScheduleExport'
@@ -36,6 +37,7 @@ const taskStore = useTaskStore()
 const projectStore = useProjectStore()
 const userStore = useUserStore()
 const planningStore = usePlanningStore()
+const approvalStore = useApprovalStore()
 
 const filters = ref<TaskFilters>({
   stage: undefined,
@@ -53,6 +55,11 @@ const showAbandoned = ref(false)
 const childParentRequirementId = ref<string | null>(null)
 const collapsedRequirementIds = ref<Set<string>>(new Set())
 const exportMessage = ref('')
+
+// 申请任务弹框
+const isRequestModalOpen = ref(false)
+const requestSaving = ref(false)
+const requestError = ref('')
 
 // Sync projectId from route (only when it changes)
 watchEffect(() => {
@@ -357,6 +364,30 @@ function openNewTaskModal() {
   isModalOpen.value = true
 }
 
+// 申请任务
+function openRequestModal() {
+  isRequestModalOpen.value = true
+  requestError.value = ''
+}
+
+function closeRequestModal() {
+  isRequestModalOpen.value = false
+  requestError.value = ''
+}
+
+async function handleRequestSubmit(data: { title: string; remark: string; phaseSnapshot: { name: string; assigneeId: string | null }[]; projectId: string; planningId: string; parentRequirementId?: string | null }) {
+  requestSaving.value = true
+  requestError.value = ''
+  try {
+    await approvalStore.submitRequest(data)
+    closeRequestModal()
+  } catch (error: any) {
+    requestError.value = error.message || '提交申请失败'
+  } finally {
+    requestSaving.value = false
+  }
+}
+
 function openEditTaskModal(task: Task) {
   selectedTask.value = task
   childParentRequirementId.value = null
@@ -453,6 +484,15 @@ function getRequirementProgressText(requirement: Task): string {
         </button>
         <span v-if="exportMessage" class="export-message">{{ exportMessage }}</span>
       </div>
+      <button class="btn btn-secondary" @click="openRequestModal">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+          <path d="M14 2v6h6" />
+          <path d="M12 18v-6" />
+          <path d="M9 15h6" />
+        </svg>
+        申请任务
+      </button>
       <button v-if="isProjectManager" class="btn btn-primary" @click="openNewTaskModal">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <path d="M12 5v14M5 12h14" />
@@ -460,6 +500,16 @@ function getRequirementProgressText(requirement: Task): string {
         新建任务
       </button>
     </div>
+
+    <!-- 申请任务弹框 -->
+    <TaskRequestModal
+      :is-open="isRequestModalOpen"
+      :project-id="projectStore.currentProjectId || undefined"
+      :saving="requestSaving"
+      :error="requestError"
+      @close="closeRequestModal"
+      @save="handleRequestSubmit"
+    />
 
     <TaskFilter :show-status-filter="false" @filter="handleFilter" />
 

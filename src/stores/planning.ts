@@ -26,6 +26,22 @@ export const usePlanningStore = defineStore('planning', () => {
     // 这里留空，等待 WebSocket 同步
   }
 
+  async function fetchPlannings(projectId: string): Promise<void> {
+    try {
+      const result = unwrapApiData<{ plannings: Planning[] }>(
+        await planningApi.getByProject(projectId) as any
+      )
+      if (result?.plannings) {
+        // 合并到现有数据，避免覆盖其他项目的 plannings
+        const existingIds = new Set(plannings.value.map(p => p.id))
+        const newPlannings = result.plannings.filter(p => !existingIds.has(p.id))
+        plannings.value = [...plannings.value, ...newPlannings]
+      }
+    } catch (error) {
+      console.error('获取迭代列表失败:', error)
+    }
+  }
+
   // 从 WebSocket sync:init 设置数据
   function setPlannings(data: Planning[]) {
     plannings.value = data
@@ -114,6 +130,7 @@ export const usePlanningStore = defineStore('planning', () => {
     getPlanningById,
     getPlanningsByProject,
     init,
+    fetchPlannings,
     setPlannings,
     clearData,
     createPlanning,
