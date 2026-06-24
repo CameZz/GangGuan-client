@@ -3,7 +3,7 @@ import { ref, computed, nextTick, watchEffect, watch, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useTaskStore, useProjectStore, useMemberStore, usePlanningStore, useUserStore } from '@/stores'
 import { ROLES } from '@/types'
-import type { RoleType, Task, TaskPhase, TaskProgressHistory } from '@/types'
+import type { RoleType, Task, TaskPhase, TaskProgressHistory, DailyNote } from '@/types'
 import {
   formatDateKey as formatScheduleDateKey,
   formatDateLabel,
@@ -15,6 +15,8 @@ import {
   WORK_SLOTS_PER_DAY
 } from '@/utils/workingSchedule'
 import TaskModal from '@/components/task/TaskModal.vue'
+import { dailyNoteApi } from '@/api/daily-notes'
+import { unwrapApiData } from '@/api/index'
 
 const route = useRoute()
 const router = useRouter()
@@ -194,6 +196,31 @@ async function loadProgressHistories() {
 // 当项目ID变化时重新加载
 watch(currentProjectId, loadProgressHistories, { immediate: true })
 
+// 加载每日备注数据
+const dailyNotesData = ref<DailyNote[]>([])
+
+async function loadDailyNotes() {
+  if (!currentProjectId.value) {
+    dailyNotesData.value = []
+    return
+  }
+  const startDate = formatDateKey(timelineStart.value)
+  const endDate = formatDateKey(timelineEnd.value)
+  try {
+    const data = unwrapApiData<{ notes: DailyNote[] }>(
+      await dailyNoteApi.getByDateRange(currentProjectId.value, startDate, endDate) as any
+    )
+    dailyNotesData.value = data?.notes || []
+  } catch (error) {
+    console.error('加载每日备注失败:', error)
+    dailyNotesData.value = []
+  }
+}
+
+watch([currentProjectId, selectedYear, selectedMonth], loadDailyNotes, { immediate: true })
+
+const monthDailyNotes = computed(() => dailyNotesData.value)
+
 const monthProgressHistories = computed(() => {
   const rangeStart = timelineStart.value.getTime()
   const rangeEnd = timelineEnd.value.getTime() + 24 * 60 * 60 * 1000
@@ -352,6 +379,7 @@ interface ProgressCell {
   count: number
   netDelta: number
   details: ProgressDetail[]
+  note: { content: string; updatedAt: string } | null
 }
 
 interface MemberProgressRow {
@@ -370,6 +398,7 @@ const getMemberName = (memberId: string | null): string => {
 const formatSignedDelta = (delta: number): string => `${delta >= 0 ? '+' : ''}${delta}pp`
 
 const memberProgressData = computed<MemberProgressRow[]>(() => {
+  // Group progress histories by memberId and dateKey
   const grouped = new Map<string, Map<string, ProgressDetail[]>>()
 
   for (const history of monthProgressHistories.value) {
@@ -394,17 +423,37 @@ const memberProgressData = computed<MemberProgressRow[]>(() => {
     })
   }
 
+  // Group daily notes by memberId and dateKey
+  const noteMap = new Map<string, Map<string, DailyNote>>()
+  for (const note of monthDailyNotes.value) {
+    if (!noteMap.has(note.memberId)) noteMap.set(note.memberId, new Map())
+    noteMap.get(note.memberId)!.set(note.dateKey, note)
+  }
+
+  // Collect all memberIds that have either progress or notes
+  const allMemberIds = new Set<string>([...grouped.keys(), ...noteMap.keys()])
+
   const rows: MemberProgressRow[] = []
-  for (const [memberId, dayMap] of grouped) {
+  for (const memberId of allMemberIds) {
     const member = members.value.find(m => m.id === memberId)
     if (!member) continue
     if (filterRoles.value.length > 0 && !filterRoles.value.includes(member.role)) continue
 
+    const dayMap = grouped.get(memberId)
+    const memberNotes = noteMap.get(memberId)
+
     const cells = visibleDaySlots.value.map(day => {
       const dateKey = formatDateKey(day.date)
-      const details = dayMap.get(dateKey)
-      if (!details || details.length === 0) return null
-      const sortedDetails = [...details].sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
+      const details = dayMap?.get(dateKey)
+      const note = memberNotes?.get(dateKey) || null
+
+      const hasDetails = details && details.length > 0
+      if (!hasDetails && !note) return null
+
+      const sortedDetails = hasDetails
+        ? [...details!].sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
+        : []
+
       return {
         memberId,
         memberName: member.name,
@@ -412,7 +461,8 @@ const memberProgressData = computed<MemberProgressRow[]>(() => {
         dateLabel: day.dateStr,
         count: sortedDetails.length,
         netDelta: sortedDetails.reduce((sum, detail) => sum + detail.delta, 0),
-        details: sortedDetails
+        details: sortedDetails,
+        note: note ? { content: note.content, updatedAt: note.updatedAt } : null
       }
     })
 
@@ -434,6 +484,91 @@ const selectedProgressCell = ref<ProgressCell | null>(null)
 
 const selectProgressCell = (cell: ProgressCell | null) => {
   selectedProgressCell.value = cell
+  // Reset note editing state when switching cells
+  isEditingNote.value = false
+  editingNoteContent.value = ''
+  addingNoteFor.value = null
+}
+
+// Note editing state
+const isEditingNote = ref(false)
+const editingNoteContent = ref('')
+const isSavingNote = ref(false)
+const addingNoteFor = ref<{ memberId: string; dateKey: string; dateLabel: string } | null>(null)
+
+function startAddNote(memberId: string, dateKey: string, dateLabel: string) {
+  selectedProgressCell.value = null
+  addingNoteFor.value = { memberId, dateKey, dateLabel }
+  editingNoteContent.value = ''
+  isEditingNote.value = true
+}
+
+function startEditNote(content: string) {
+  editingNoteContent.value = content
+  isEditingNote.value = true
+}
+
+function cancelEditNote() {
+  isEditingNote.value = false
+  editingNoteContent.value = ''
+  if (addingNoteFor.value) {
+    addingNoteFor.value = null
+  }
+}
+
+async function saveNote() {
+  const content = editingNoteContent.value.trim()
+  if (!content) return
+
+  const projectId = currentProjectId.value
+  if (!projectId) return
+
+  let dateKey: string
+  let memberId: string
+
+  if (addingNoteFor.value) {
+    dateKey = addingNoteFor.value.dateKey
+    memberId = addingNoteFor.value.memberId
+  } else if (selectedProgressCell.value) {
+    dateKey = selectedProgressCell.value.dateKey
+    memberId = selectedProgressCell.value.memberId
+  } else {
+    return
+  }
+
+  if (userStore.currentUser?.id !== memberId) return
+
+  isSavingNote.value = true
+  try {
+    await dailyNoteApi.upsert(projectId, dateKey, content)
+    await loadDailyNotes()
+    isEditingNote.value = false
+    editingNoteContent.value = ''
+    addingNoteFor.value = null
+  } catch (error) {
+    console.error('保存备注失败:', error)
+  } finally {
+    isSavingNote.value = false
+  }
+}
+
+async function deleteNote() {
+  const projectId = currentProjectId.value
+  if (!projectId || !selectedProgressCell.value) return
+
+  const { memberId, dateKey } = selectedProgressCell.value
+  if (userStore.currentUser?.id !== memberId) return
+
+  try {
+    await dailyNoteApi.remove(projectId, dateKey)
+    await loadDailyNotes()
+    // If the cell now has no details either, close the panel
+    if (selectedProgressCell.value.details.length === 0) {
+      selectedProgressCell.value = null
+    }
+  } catch (error) {
+    console.error('删除备注失败:', error)
+  }
 }
 
 // Bar style for a task phase
@@ -511,6 +646,7 @@ const getRoleName = (role: RoleType): string => roleNames[role] || role
 
 // Workday logic
 const canEditWorkday = computed(() => userStore.isAdmin || userStore.currentUser?.role === 'pm')
+const canEditNote = (memberId: string) => userStore.currentUser?.id === memberId
 
 const workdayConfig = computed(() => ({
   nonWorkdays: projectStore.currentProject?.nonWorkdays || [],
@@ -820,8 +956,35 @@ const activePlannings = computed(() => {
                 class="progress-cell"
                 :class="{ 'non-workday-cell': !isWorkday(visibleDaySlots[index].date), selected: cell && selectedProgressCell?.memberId === cell.memberId && selectedProgressCell?.dateKey === cell.dateKey }"
               >
+                <!-- Combined card: note + progress details -->
                 <button
-                  v-if="cell"
+                  v-if="cell && cell.note && cell.details.length > 0"
+                  class="progress-cell-button has-note"
+                  :class="{ negative: cell.netDelta < 0 }"
+                  @click="selectProgressCell(cell)"
+                >
+                  <div class="progress-cell-note-preview">📝 {{ cell.note.content.length > 30 ? cell.note.content.slice(0, 30) + '…' : cell.note.content }}</div>
+                  <div class="progress-cell-details">
+                    <div v-for="detail in cell.details" :key="detail.id" class="progress-cell-detail-item">
+                      <span class="detail-task">{{ detail.taskTitle }}</span>
+                      <span class="detail-sep">-</span>
+                      <span class="detail-phase">{{ detail.phaseName }}</span>
+                      <span class="detail-sep">-</span>
+                      <span class="detail-change">{{ detail.oldProgress }}%→{{ detail.newProgress }}%</span>
+                    </div>
+                  </div>
+                </button>
+                <!-- Note-only card -->
+                <button
+                  v-else-if="cell && cell.note"
+                  class="progress-cell-button note-only"
+                  @click="selectProgressCell(cell)"
+                >
+                  <div class="progress-cell-note-preview">📝 {{ cell.note.content.length > 50 ? cell.note.content.slice(0, 50) + '…' : cell.note.content }}</div>
+                </button>
+                <!-- Progress-only card (existing) -->
+                <button
+                  v-else-if="cell"
                   class="progress-cell-button"
                   :class="{ negative: cell.netDelta < 0 }"
                   @click="selectProgressCell(cell)"
@@ -836,21 +999,66 @@ const activePlannings = computed(() => {
                     </div>
                   </div>
                 </button>
+                <!-- Empty cell: + button for current user -->
+                <button
+                  v-else-if="canEditNote(memberData.memberId)"
+                  class="progress-cell-add"
+                  @click="startAddNote(memberData.memberId, formatDateKey(visibleDaySlots[index].date), visibleDaySlots[index].dateStr)"
+                >
+                  +
+                </button>
               </div>
             </div>
           </div>
         </div>
       </div>
 
-      <div v-if="selectedProgressCell" class="progress-detail-panel">
+      <div v-if="selectedProgressCell || addingNoteFor" class="progress-detail-panel">
         <div class="progress-detail-header">
           <div>
-            <div class="progress-detail-title">{{ selectedProgressCell.memberName }} · {{ selectedProgressCell.dateLabel }}</div>
-            <div class="progress-detail-subtitle">{{ selectedProgressCell.count }}次变更，净变化 {{ formatSignedDelta(selectedProgressCell.netDelta) }}</div>
+            <div class="progress-detail-title">
+              {{ selectedProgressCell?.memberName || getMemberName(addingNoteFor?.memberId || '') }} · {{ selectedProgressCell?.dateLabel || addingNoteFor?.dateLabel }}
+            </div>
+            <div v-if="selectedProgressCell && selectedProgressCell.count > 0" class="progress-detail-subtitle">
+              {{ selectedProgressCell.count }}次变更，净变化 {{ formatSignedDelta(selectedProgressCell.netDelta) }}
+            </div>
           </div>
-          <button class="progress-detail-close" @click="selectProgressCell(null)">关闭</button>
+          <button class="progress-detail-close" @click="selectProgressCell(null); addingNoteFor = null">关闭</button>
         </div>
-        <div class="progress-detail-list">
+
+        <!-- Note section -->
+        <div v-if="selectedProgressCell || addingNoteFor || isEditingNote" class="note-section">
+          <div class="note-section-header">
+            <span class="note-section-title">📝 今日备注</span>
+            <div v-if="!isEditingNote && canEditNote(selectedProgressCell?.memberId || addingNoteFor?.memberId || '')" class="note-actions">
+              <button class="btn btn-ghost btn-sm" @click="startEditNote(selectedProgressCell?.note?.content || '')">{{ selectedProgressCell?.note ? '编辑' : '添加' }}</button>
+              <button v-if="selectedProgressCell?.note" class="btn btn-ghost btn-sm danger" @click="deleteNote">删除</button>
+            </div>
+          </div>
+          <div v-if="isEditingNote" class="note-edit">
+            <textarea
+              v-model="editingNoteContent"
+              class="note-textarea"
+              placeholder="填写今天的工作内容..."
+              rows="4"
+            ></textarea>
+            <div class="note-edit-actions">
+              <button class="btn btn-primary btn-sm" :disabled="isSavingNote || !editingNoteContent.trim()" @click="saveNote">
+                {{ isSavingNote ? '保存中...' : '保存' }}
+              </button>
+              <button class="btn btn-secondary btn-sm" @click="cancelEditNote">取消</button>
+            </div>
+          </div>
+          <div v-else-if="selectedProgressCell?.note" class="note-content">
+            {{ selectedProgressCell.note.content }}
+          </div>
+          <div v-else class="note-empty-hint">
+            暂无备注
+          </div>
+        </div>
+
+        <!-- Progress details section -->
+        <div v-if="selectedProgressCell && selectedProgressCell.details.length > 0" class="progress-detail-list">
           <div
             v-for="detail in selectedProgressCell.details"
             :key="detail.id"
@@ -1432,6 +1640,135 @@ const activePlannings = computed(() => {
   margin-top: 8px;
   color: var(--color-text-muted);
   font-size: 12px;
+}
+
+/* Note-only card */
+.progress-cell-button.note-only {
+  border-color: #bfdbfe;
+  background-color: #dbeafe;
+  color: #1e40af;
+}
+
+.progress-cell-button.note-only:hover {
+  border-color: #93c5fd;
+}
+
+/* Combined card: note + progress */
+.progress-cell-button.has-note {
+  border-color: #bbf7d0;
+  background-color: #dcfce7;
+  color: #15803d;
+  gap: 3px;
+}
+
+.progress-cell-button.has-note .progress-cell-note-preview {
+  border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+  padding-bottom: 3px;
+  margin-bottom: 1px;
+}
+
+/* Note preview in cell */
+.progress-cell-note-preview {
+  font-size: 10px;
+  line-height: 1.3;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-align: left;
+  color: #1e40af;
+}
+
+/* Add note button for empty cells */
+.progress-cell-add {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: center;
+  min-height: 60px;
+  padding: 4px;
+  border: 1px dashed #cbd5e1;
+  border-radius: var(--radius-sm);
+  background-color: transparent;
+  color: #94a3b8;
+  font-size: 18px;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.progress-cell-add:hover {
+  border-color: #60a5fa;
+  background-color: #eff6ff;
+  color: #3b82f6;
+}
+
+/* Note section in detail panel */
+.note-section {
+  margin-bottom: 12px;
+  padding: 12px;
+  border: 1px solid #bfdbfe;
+  border-radius: var(--radius-md);
+  background-color: #eff6ff;
+}
+
+.note-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.note-section-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #1e40af;
+}
+
+.note-actions {
+  display: flex;
+  gap: 4px;
+}
+
+.note-content {
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--color-text-primary);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.note-empty-hint {
+  font-size: 12px;
+  color: #94a3b8;
+}
+
+.note-edit {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.note-textarea {
+  width: 100%;
+  padding: 8px;
+  border: 1px solid #93c5fd;
+  border-radius: var(--radius-sm);
+  background-color: #fff;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--color-text-primary);
+  resize: vertical;
+  outline: none;
+}
+
+.note-textarea:focus {
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.15);
+}
+
+.note-edit-actions {
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
 }
 
 /* Legend */

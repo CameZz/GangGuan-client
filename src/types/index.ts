@@ -132,6 +132,16 @@ export interface TaskProgressHistory {
   createdAt: string
 }
 
+export interface DailyNote {
+  id: string
+  memberId: string
+  projectId: string
+  dateKey: string
+  content: string
+  createdAt: string
+  updatedAt: string
+}
+
 export const HISTORY_FIELD_LABELS: Record<string, string> = {
   status: '状态',
   priority: '优先级',
