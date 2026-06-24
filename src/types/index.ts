@@ -79,6 +79,7 @@ export interface User {
 export interface Planning {
   id: string
   name: string
+  color: string | null
   deadline: string | null
   projectId: string
   createdAt: string
@@ -183,6 +184,25 @@ export interface Task {
   comments: Comment[]
 }
 
+// Notification types
+export type NotificationType = 'progress_update' | 'behind_progress' | 'comment' | 'reference'
+
+export interface Notification {
+  id: string
+  type: NotificationType
+  title: string
+  body: string
+  dedupeKey: string | null
+  readAt: string | null
+  createdAt: string
+  recipientId: string
+  actorId: string | null
+  projectId: string | null
+  planningId: string | null
+  taskId: string | null
+  phaseId: string | null
+}
+
 // WebSocket message types
 export type WSMessageType =
   | 'task:create' | 'task:update' | 'task:delete'
@@ -191,6 +211,7 @@ export type WSMessageType =
   | 'planning:create' | 'planning:update' | 'planning:delete'
   | 'user:login' | 'user:logout' | 'user:create' | 'user:update' | 'user:delete'
   | 'sync:init' | 'sync:update'
+  | 'notification:create' | 'notification:update' | 'notification:read-all'
 
 export interface WSMessage {
   type: WSMessageType

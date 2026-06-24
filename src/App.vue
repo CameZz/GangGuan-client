@@ -5,7 +5,7 @@ import AppHeader from '@/components/layout/AppHeader.vue'
 import AppSidebar from '@/components/layout/AppSidebar.vue'
 
 const route = useRoute()
-const hideSidebarRoutes = ['/projects', '/login', '/admin']
+const hideSidebarRoutes = ['/projects', '/login', '/admin', '/messages']
 const hideSidebarRouteNames = ['ProjectDetail']
 const hideSidebarPrefixes = ['/member-schedule']
 const showSidebar = computed(() => {

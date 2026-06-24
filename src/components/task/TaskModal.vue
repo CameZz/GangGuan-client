@@ -130,6 +130,8 @@ const isEditing = computed(() => !!props.task)
 const isRequirementItem = computed(() => form.value.itemType === 'requirement')
 const isTaskItem = computed(() => form.value.itemType !== 'requirement')
 const isChildTaskCreation = computed(() => !!props.initialParentRequirementId && !props.task)
+const isProjectManager = computed(() => userStore.isAdmin || userStore.currentUser?.role === 'pm')
+const canEditBasicInfo = computed(() => !isEditing.value || isProjectManager.value)
 
 const requirementOptions = computed(() => {
   if (!form.value.projectId || !form.value.planningId) return []
@@ -630,7 +632,7 @@ function getProgressDelta(history: TaskProgressHistory): string {
     <div class="modal modal-lg">
       <div class="modal-header">
         <div class="modal-title-row">
-          <h2 class="modal-title">{{ isEditing ? (isRequirementItem ? '编辑需求单' : '编辑任务单') : '新建单据' }}</h2>
+          <h2 class="modal-title">{{ isEditing ? (isRequirementItem ? '编辑需求单' : '编辑任务单') : '新建单据' }}<span v-if="isEditing && !canEditBasicInfo" class="readonly-badge">只读</span></h2>
           <div v-if="!isEditing" class="type-selector type-selector--header">
             <button
               class="type-option"
@@ -707,6 +709,7 @@ function getProgressDelta(history: TaskProgressHistory): string {
               type="text"
               class="input"
               placeholder="输入任务标题"
+              :disabled="!canEditBasicInfo"
             />
           </div>
           <div class="form-group">
@@ -715,12 +718,13 @@ function getProgressDelta(history: TaskProgressHistory): string {
               v-model="form.description"
               class="input textarea"
               placeholder="输入任务描述"
+              :disabled="!canEditBasicInfo"
             ></textarea>
           </div>
           <div class="form-row task-meta-row" :class="{ 'task-meta-row--task': isTaskItem }">
             <div v-if="isTaskItem" class="form-group">
               <label class="label">状态</label>
-              <select v-model="form.status" class="input select">
+              <select v-model="form.status" class="input select" :disabled="!canEditBasicInfo">
                 <option value="todo">待办</option>
                 <option value="in-progress">进行中</option>
                 <option value="done">已完成</option>
@@ -729,7 +733,7 @@ function getProgressDelta(history: TaskProgressHistory): string {
             </div>
             <div class="form-group">
               <label class="label">优先级</label>
-              <select v-model="form.priority" class="input select">
+              <select v-model="form.priority" class="input select" :disabled="!canEditBasicInfo">
                 <option value="low">低</option>
                 <option value="medium">中</option>
                 <option value="high">高</option>
@@ -737,7 +741,7 @@ function getProgressDelta(history: TaskProgressHistory): string {
             </div>
             <div v-if="isTaskItem" class="form-group">
               <label class="label">所属需求</label>
-              <select v-model="form.parentRequirementId" class="input select">
+              <select v-model="form.parentRequirementId" class="input select" :disabled="!canEditBasicInfo">
                 <option :value="null">不归属需求单</option>
                 <option v-for="requirement in requirementOptions" :key="requirement.id" :value="requirement.id">
                   {{ requirement.title }}
@@ -747,7 +751,7 @@ function getProgressDelta(history: TaskProgressHistory): string {
           </div>
           <div v-if="isEditing" class="form-group">
             <label class="label">规划</label>
-            <select v-model="form.planningId" class="input select">
+            <select v-model="form.planningId" class="input select" :disabled="!canEditBasicInfo">
               <option :value="null">无规划</option>
               <option v-for="planning in plannings" :key="planning.id" :value="planning.id">
                 {{ planning.name }}
@@ -761,7 +765,7 @@ function getProgressDelta(history: TaskProgressHistory): string {
                 <span>当前：{{ currentPhaseLabel }}</span>
                 <span>{{ phaseProgress.done }}/{{ phaseProgress.total }} · {{ phaseProgress.percent }}%</span>
               </div>
-              <div class="phase-add-row">
+              <div v-if="canEditBasicInfo" class="phase-add-row">
                 <select v-model="phaseTemplateToAdd" class="input select">
                   <option value="">选择阶段</option>
                   <option v-for="template in availablePhaseTemplates" :key="template.id" :value="template.id">
@@ -786,6 +790,7 @@ function getProgressDelta(history: TaskProgressHistory): string {
                   <select
                     :value="phase.assigneeId || ''"
                     class="input select phase-assignee-select"
+                    :disabled="!canEditBasicInfo"
                     @focus="selectedPhaseIndex = index"
                     @change="updateTaskPhaseAssignee(index, ($event.target as HTMLSelectElement).value)"
                   >
@@ -800,6 +805,7 @@ function getProgressDelta(history: TaskProgressHistory): string {
                       step="1800"
                       class="input"
                       :value="toLocalDateTimeInputValue(phase.startTime, 'start')"
+                      :disabled="!canEditBasicInfo"
                       @focus="handlePhaseStartFocus(index, $event)"
                       @change="updateTaskPhaseStartTime(index, ($event.target as HTMLInputElement).value)"
                       placeholder="开始时间"
@@ -810,12 +816,13 @@ function getProgressDelta(history: TaskProgressHistory): string {
                       step="1800"
                       class="input"
                       :value="toLocalDateTimeInputValue(phase.endTime, 'end')"
+                      :disabled="!canEditBasicInfo"
                       @focus="handlePhaseEndFocus(index, $event)"
                       @change="updateTaskPhaseEndTime(index, ($event.target as HTMLInputElement).value)"
                       placeholder="结束时间"
                     />
                   </div>
-                  <div class="phase-row-actions">
+                  <div v-if="canEditBasicInfo" class="phase-row-actions">
                     <button
                       class="btn btn-ghost phase-icon-button"
                       :disabled="index === 0"
@@ -902,7 +909,7 @@ function getProgressDelta(history: TaskProgressHistory): string {
           <div v-if="isTaskItem" class="form-row">
             <div class="form-group">
               <label class="label">截止日期</label>
-              <input v-model="form.dueDate" type="date" class="input" />
+              <input v-model="form.dueDate" type="date" class="input" :disabled="!canEditBasicInfo" />
             </div>
             <div class="form-group">
               <label class="label">当前执行者</label>
@@ -931,7 +938,7 @@ function getProgressDelta(history: TaskProgressHistory): string {
               </span>
             </div>
           </div>
-          <button v-if="props.task?.id" class="btn btn-secondary" @click="emit('createChild', props.task.id)">
+          <button v-if="props.task?.id && canEditBasicInfo" class="btn btn-secondary" @click="emit('createChild', props.task.id)">
             新增任务单
           </button>
         </div>
@@ -1114,7 +1121,7 @@ function getProgressDelta(history: TaskProgressHistory): string {
 
       <div class="modal-footer">
         <div v-if="deleteError || scheduleError" class="delete-error">{{ deleteError || scheduleError }}</div>
-        <button v-if="isEditing" class="btn btn-danger" :disabled="!!deleteBlockedReason" @click="handleDelete">删除</button>
+        <button v-if="isEditing && canEditBasicInfo" class="btn btn-danger" :disabled="!!deleteBlockedReason" @click="handleDelete">删除</button>
         <div class="spacer"></div>
         <button class="btn btn-secondary" @click="emit('close')">取消</button>
         <button class="btn btn-primary" @click="handleSubmit">保存</button>
@@ -2029,5 +2036,17 @@ function getProgressDelta(history: TaskProgressHistory): string {
   margin-top: 2px;
   font-size: 12px;
   color: var(--color-text-muted);
+}
+
+.readonly-badge {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 2px 8px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--color-text-muted);
+  background-color: var(--color-bg-tertiary);
+  border-radius: var(--radius-sm);
+  vertical-align: middle;
 }
 </style>

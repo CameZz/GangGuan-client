@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
-import { useProjectStore, usePlanningStore, useTaskStore } from '@/stores'
+import { useProjectStore, usePlanningStore, useTaskStore, useUserStore } from '@/stores'
 import type { Planning } from '@/types'
 
 const router = useRouter()
@@ -9,9 +9,11 @@ const route = useRoute()
 const projectStore = useProjectStore()
 const planningStore = usePlanningStore()
 const taskStore = useTaskStore()
+const userStore = useUserStore()
 
 const currentProject = computed(() => projectStore.currentProject)
 const selectedPlanningId = computed(() => projectStore.selectedPlanningId)
+const canManagePlanning = computed(() => userStore.isProjectManager)
 const planningSyncedRouteNames = [
   'Dashboard',
   'ProjectDashboard',
@@ -35,8 +37,11 @@ const completedExpanded = ref(true)
 const showNewPlanningForm = ref(false)
 const newPlanningName = ref('')
 const newPlanningDeadline = ref('')
+const PLANNING_COLORS = ['#6366f1', '#14b8a6', '#f59e0b', '#ec4899', '#8b5cf6', '#22c55e', '#f43f5e', '#06b6d4']
+const newPlanningColor = ref(PLANNING_COLORS[0])
 const editingPlanningId = ref<string | null>(null)
 const editPlanningDeadline = ref('')
+const editPlanningColor = ref(PLANNING_COLORS[0])
 const isSavingPlanning = ref(false)
 
 // Sort by deadline helper
@@ -117,18 +122,22 @@ function getDateInputValue(date: string | null | undefined): string {
 }
 
 function toggleNewPlanningForm() {
+  if (!canManagePlanning.value) return
   showNewPlanningForm.value = !showNewPlanningForm.value
   if (!showNewPlanningForm.value) {
     newPlanningName.value = ''
     newPlanningDeadline.value = ''
+    newPlanningColor.value = PLANNING_COLORS[0]
   }
 }
 
 async function createPlanning() {
+  if (!canManagePlanning.value) return
   if (!newPlanningName.value.trim() || !currentProject.value) return
 
   const planning = await planningStore.createPlanning(currentProject.value.id, {
     name: newPlanningName.value.trim(),
+    color: newPlanningColor.value,
     deadline: newPlanningDeadline.value ? new Date(newPlanningDeadline.value).toISOString() : null,
     projectId: currentProject.value.id,
   })
@@ -136,6 +145,7 @@ async function createPlanning() {
   // Reset form
   newPlanningName.value = ''
   newPlanningDeadline.value = ''
+  newPlanningColor.value = PLANNING_COLORS[0]
   showNewPlanningForm.value = false
 
   // Auto-select the new planning
@@ -145,20 +155,25 @@ async function createPlanning() {
 }
 
 function startEditPlanning(planning: Planning) {
+  if (!canManagePlanning.value) return
   editingPlanningId.value = planning.id
   editPlanningDeadline.value = getDateInputValue(planning.deadline)
+  editPlanningColor.value = planning.color || PLANNING_COLORS[0]
 }
 
 function cancelEditPlanning() {
   editingPlanningId.value = null
   editPlanningDeadline.value = ''
+  editPlanningColor.value = PLANNING_COLORS[0]
 }
 
 async function savePlanningDeadline(planning: Planning) {
+  if (!canManagePlanning.value) return
   if (isSavingPlanning.value) return
   isSavingPlanning.value = true
   const updated = await planningStore.updatePlanning(planning.id, {
     ...planning,
+    color: editPlanningColor.value,
     deadline: editPlanningDeadline.value ? new Date(editPlanningDeadline.value).toISOString() : null
   })
   isSavingPlanning.value = false
@@ -175,13 +190,13 @@ async function savePlanningDeadline(planning: Planning) {
       <div class="sidebar-section">
         <div class="section-header">
           <span class="section-title">迭代</span>
-          <button class="btn-add" @click="toggleNewPlanningForm" :title="showNewPlanningForm ? '取消' : '新增迭代'">
+          <button v-if="canManagePlanning" class="btn-add" @click="toggleNewPlanningForm" :title="showNewPlanningForm ? '取消' : '新增迭代'">
             {{ showNewPlanningForm ? '✕' : '+' }}
           </button>
         </div>
 
         <!-- New Planning Form -->
-        <div v-if="showNewPlanningForm" class="new-planning-form">
+        <div v-if="canManagePlanning && showNewPlanningForm" class="new-planning-form">
           <input
             v-model="newPlanningName"
             type="text"
@@ -189,6 +204,16 @@ async function savePlanningDeadline(planning: Planning) {
             placeholder="迭代名称"
             @keyup.enter="createPlanning"
           />
+          <div class="color-picker">
+            <span
+              v-for="c in PLANNING_COLORS"
+              :key="c"
+              class="color-dot"
+              :class="{ selected: newPlanningColor === c }"
+              :style="{ backgroundColor: c }"
+              @click="newPlanningColor = c"
+            />
+          </div>
           <input
             v-model="newPlanningDeadline"
             type="date"
@@ -221,6 +246,11 @@ async function savePlanningDeadline(planning: Planning) {
                   :class="{ selected: selectedPlanningId === planning.id }"
                   @click="selectIteration(planning.id)"
                 >
+                  <span
+                    v-if="planning.color"
+                    class="iteration-color-dot"
+                    :style="{ backgroundColor: planning.color }"
+                  />
                   <div class="iteration-info">
                     <span class="iteration-name">{{ planning.name }}</span>
                     <span v-if="planning.deadline" class="iteration-deadline">
@@ -228,6 +258,7 @@ async function savePlanningDeadline(planning: Planning) {
                     </span>
                   </div>
                   <button
+                    v-if="canManagePlanning"
                     class="btn-edit-planning"
                     title="编辑迭代"
                     aria-label="编辑迭代"
@@ -239,7 +270,17 @@ async function savePlanningDeadline(planning: Planning) {
                     </svg>
                   </button>
                 </div>
-                <div v-if="editingPlanningId === planning.id" class="edit-planning-form" @click.stop>
+                <div v-if="canManagePlanning && editingPlanningId === planning.id" class="edit-planning-form" @click.stop>
+                  <div class="color-picker">
+                    <span
+                      v-for="c in PLANNING_COLORS"
+                      :key="c"
+                      class="color-dot"
+                      :class="{ selected: editPlanningColor === c }"
+                      :style="{ backgroundColor: c }"
+                      @click="editPlanningColor = c"
+                    />
+                  </div>
                   <input
                     v-model="editPlanningDeadline"
                     type="date"
@@ -273,6 +314,11 @@ async function savePlanningDeadline(planning: Planning) {
                   :class="{ selected: selectedPlanningId === planning.id }"
                   @click="selectIteration(planning.id)"
                 >
+                  <span
+                    v-if="planning.color"
+                    class="iteration-color-dot"
+                    :style="{ backgroundColor: planning.color }"
+                  />
                   <div class="iteration-info">
                     <span class="iteration-name">{{ planning.name }}</span>
                     <span v-if="planning.deadline" class="iteration-deadline">
@@ -280,6 +326,7 @@ async function savePlanningDeadline(planning: Planning) {
                     </span>
                   </div>
                   <button
+                    v-if="canManagePlanning"
                     class="btn-edit-planning"
                     title="编辑迭代"
                     aria-label="编辑迭代"
@@ -291,7 +338,17 @@ async function savePlanningDeadline(planning: Planning) {
                     </svg>
                   </button>
                 </div>
-                <div v-if="editingPlanningId === planning.id" class="edit-planning-form" @click.stop>
+                <div v-if="canManagePlanning && editingPlanningId === planning.id" class="edit-planning-form" @click.stop>
+                  <div class="color-picker">
+                    <span
+                      v-for="c in PLANNING_COLORS"
+                      :key="c"
+                      class="color-dot"
+                      :class="{ selected: editPlanningColor === c }"
+                      :style="{ backgroundColor: c }"
+                      @click="editPlanningColor = c"
+                    />
+                  </div>
                   <input
                     v-model="editPlanningDeadline"
                     type="date"
@@ -398,6 +455,30 @@ async function savePlanningDeadline(planning: Planning) {
   color: var(--color-text-primary);
 }
 
+.color-picker {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.color-dot {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  cursor: pointer;
+  border: 2px solid transparent;
+  transition: border-color var(--transition-fast), transform var(--transition-fast);
+}
+
+.color-dot:hover {
+  transform: scale(1.15);
+}
+
+.color-dot.selected {
+  border-color: var(--color-text-primary);
+  transform: scale(1.15);
+}
+
 .new-planning-form .input:focus {
   outline: none;
   border-color: var(--color-primary);
@@ -466,6 +547,13 @@ async function savePlanningDeadline(planning: Planning) {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.iteration-color-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
 }
 
 .iteration-deadline {

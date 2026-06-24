@@ -304,6 +304,7 @@ const mockPlannings: Planning[] = [
     {
         id: "plan-1",
         name: "立项与策划",
+        color: null,
         deadline: "2026-05-15T00:00:00Z",
         projectId: "proj-1",
         createdAt: "2026-04-20T10:00:00Z",
@@ -311,6 +312,7 @@ const mockPlannings: Planning[] = [
     {
         id: "plan-2",
         name: "核心战斗系统",
+        color: null,
         deadline: "2026-06-01T00:00:00Z",
         projectId: "proj-1",
         createdAt: "2026-05-01T00:00:00Z",
@@ -318,6 +320,7 @@ const mockPlannings: Planning[] = [
     {
         id: "plan-3",
         name: "角色养成系统",
+        color: null,
         deadline: "2026-06-20T00:00:00Z",
         projectId: "proj-1",
         createdAt: "2026-05-10T10:00:00Z",
@@ -326,6 +329,7 @@ const mockPlannings: Planning[] = [
     {
         id: "plan-4",
         name: "美术资源制作",
+        color: null,
         deadline: "2026-05-30T00:00:00Z",
         projectId: "proj-1",
         createdAt: "2026-04-25T08:00:00Z",
@@ -334,6 +338,7 @@ const mockPlannings: Planning[] = [
     {
         id: "plan-5",
         name: "引擎与框架搭建",
+        color: null,
         deadline: "2026-05-20T00:00:00Z",
         projectId: "proj-2",
         createdAt: "2026-04-25T08:00:00Z",
@@ -341,6 +346,7 @@ const mockPlannings: Planning[] = [
     {
         id: "plan-6",
         name: "场景与渲染优化",
+        color: null,
         deadline: "2026-06-15T00:00:00Z",
         projectId: "proj-2",
         createdAt: "2026-05-05T08:00:00Z",

@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { ref, computed, nextTick, watchEffect, watch } from 'vue'
-import { useRoute } from 'vue-router'
+import { ref, computed, nextTick, watchEffect, watch, onMounted } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { useTaskStore, useProjectStore, useMemberStore, usePlanningStore, useUserStore } from '@/stores'
 import { ROLES } from '@/types'
 import type { RoleType, Task, TaskPhase, TaskProgressHistory } from '@/types'
@@ -17,6 +17,7 @@ import {
 import TaskModal from '@/components/task/TaskModal.vue'
 
 const route = useRoute()
+const router = useRouter()
 const taskStore = useTaskStore()
 const projectStore = useProjectStore()
 const memberStore = useMemberStore()
@@ -60,6 +61,36 @@ async function handleDelete(taskId: string) {
   const success = await taskStore.deleteTask(taskId)
   if (success) closeModal()
 }
+
+// 从消息中心跳转时自动打开任务弹框
+async function handleOpenTaskFromQuery() {
+  const taskId = route.query.taskId as string | undefined
+  if (!taskId) return
+  await router.replace({ query: { ...route.query, taskId: undefined } })
+  await nextTick()
+
+  const projectId = route.params.projectId as string | undefined
+  const task = await taskStore.fetchTaskById(taskId, projectId)
+  if (!task) {
+    alert('该任务已被删除')
+    return
+  }
+  if (task.planningId && task.planningId !== projectStore.selectedPlanningId) {
+    projectStore.setSelectedPlanning(task.planningId)
+  }
+  await nextTick()
+  openEditTaskModal(task)
+}
+
+onMounted(() => {
+  handleOpenTaskFromQuery()
+})
+
+watch(() => route.query.taskId, (taskId) => {
+  if (taskId) {
+    handleOpenTaskFromQuery()
+  }
+})
 
 const filterRoles = ref<RoleType[]>([])
 
@@ -277,7 +308,7 @@ const planningColorMap = computed(() => {
   const map = new Map<string, string>()
   const allPlannings = plannings.value
   allPlannings.forEach((p, index) => {
-    map.set(p.id, PLANNING_COLORS[index % PLANNING_COLORS.length])
+    map.set(p.id, p.color || PLANNING_COLORS[index % PLANNING_COLORS.length])
   })
   return map
 })

@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { ref, computed, watchEffect } from 'vue'
-import { useRoute } from 'vue-router'
+import { ref, computed, watchEffect, watch, nextTick, onMounted } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import type { Task, TaskStage, TaskStatus, TaskPriority } from '@/types'
 import { useTaskStore, useProjectStore, useUserStore, usePlanningStore } from '@/stores'
 import TaskCard from '@/components/task/TaskCard.vue'
@@ -31,6 +31,7 @@ interface KanbanTaskEntry {
 type KanbanEntry = KanbanRequirementEntry | KanbanTaskEntry
 
 const route = useRoute()
+const router = useRouter()
 const taskStore = useTaskStore()
 const projectStore = useProjectStore()
 const userStore = useUserStore()
@@ -44,6 +45,7 @@ const filters = ref<TaskFilters>({
 })
 
 const selectedPlanningId = computed(() => projectStore.selectedPlanningId)
+const isProjectManager = computed(() => userStore.isAdmin || userStore.currentUser?.role === 'pm')
 
 const isModalOpen = ref(false)
 const selectedTask = ref<Task | null>(null)
@@ -73,6 +75,38 @@ watchEffect(() => {
   const projectId = projectStore.currentProjectId
   if (projectId) {
     taskStore.fetchTasks(projectId)
+  }
+})
+
+// 从消息中心跳转时自动打开任务弹框
+async function handleOpenTaskFromQuery() {
+  const taskId = route.query.taskId as string | undefined
+  if (!taskId) return
+  // 立即清除 query，避免刷新重复打开
+  await router.replace({ query: { ...route.query, taskId: undefined } })
+  await nextTick()
+
+  const projectId = route.params.projectId as string | undefined
+  const task = await taskStore.fetchTaskById(taskId, projectId)
+  if (!task) {
+    alert('该任务已被删除')
+    return
+  }
+  if (task.planningId && task.planningId !== projectStore.selectedPlanningId) {
+    projectStore.setSelectedPlanning(task.planningId)
+  }
+  await nextTick()
+  openEditTaskModal(task)
+}
+
+onMounted(() => {
+  handleOpenTaskFromQuery()
+})
+
+// 监听后续从消息中心跳转过来的情况（同页导航）
+watch(() => route.query.taskId, (taskId) => {
+  if (taskId) {
+    handleOpenTaskFromQuery()
   }
 })
 
@@ -383,6 +417,7 @@ function handleDragOver(e: DragEvent) {
 
 async function handleDrop(e: DragEvent, status: TaskStatus) {
   e.preventDefault()
+  if (!isProjectManager.value) return
   const taskId = e.dataTransfer?.getData('text/plain')
   if (taskId) {
     await taskStore.moveTask(taskId, status, userStore.currentUser?.id)
@@ -418,7 +453,7 @@ function getRequirementProgressText(requirement: Task): string {
         </button>
         <span v-if="exportMessage" class="export-message">{{ exportMessage }}</span>
       </div>
-      <button class="btn btn-primary" @click="openNewTaskModal">
+      <button v-if="isProjectManager" class="btn btn-primary" @click="openNewTaskModal">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <path d="M12 5v14M5 12h14" />
         </svg>
@@ -445,25 +480,32 @@ function getRequirementProgressText(requirement: Task): string {
             <div
               v-if="entry.kind === 'requirement'"
               class="requirement-group"
+              :class="{ 'requirement-group--empty': entry.childTasks.length === 0 }"
             >
               <div class="requirement-group-header" @click="openEditTaskModal(entry.requirement)">
                 <div>
-                  <div class="requirement-group-title">{{ entry.requirement.title }}</div>
+                  <div class="requirement-title-line">
+                    <span class="requirement-group-title">{{ entry.requirement.title }}</span>
+                    <span class="item-type requirement">需求单</span>
+                    <button
+                      v-if="entry.childTasks.length > 0"
+                      class="btn btn-ghost btn-sm requirement-toggle"
+                      :aria-expanded="!isRequirementCollapsed(entry.requirement.id)"
+                      @click.stop="toggleRequirementCollapsed(entry.requirement.id)"
+                    >
+                      {{ isRequirementCollapsed(entry.requirement.id) ? '展开' : '折叠' }}
+                    </button>
+                  </div>
                   <div class="requirement-group-meta">
-                    <span>需求单</span>
-                    <span>{{ getRequirementProgressText(entry.requirement) }}</span>
+                    <span>拆分进度：{{ getRequirementProgressText(entry.requirement) }}</span>
                     <span>{{ entry.childTasks.length }} 个任务</span>
                   </div>
                 </div>
-                <div class="requirement-actions">
-                  <button
-                    class="btn btn-ghost btn-sm"
-                    :aria-expanded="!isRequirementCollapsed(entry.requirement.id)"
-                    @click.stop="toggleRequirementCollapsed(entry.requirement.id)"
-                  >
-                    {{ isRequirementCollapsed(entry.requirement.id) ? '展开' : '折叠' }}
-                  </button>
-                  <button class="btn btn-ghost btn-sm" @click.stop="openChildTaskModal(entry.requirement.id)">
+                <div v-if="isProjectManager" class="requirement-actions">
+                  <button class="btn btn-primary requirement-add-button" @click.stop="openChildTaskModal(entry.requirement.id)">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <path d="M12 5v14M5 12h14" />
+                    </svg>
                     新增任务
                   </button>
                 </div>
@@ -476,20 +518,15 @@ function getRequirementProgressText(requirement: Task): string {
                   v-for="childTask in entry.childTasks"
                   :key="childTask.id"
                   :task="childTask"
+                  :draggable="isProjectManager"
                   @click="openEditTaskModal(childTask)"
                 />
               </div>
-              <div
-                v-else-if="entry.childTasks.length > 0"
-                class="requirement-collapsed"
-              >
-                已折叠 {{ entry.childTasks.length }} 个任务
-              </div>
-              <div v-else class="requirement-empty">待拆分</div>
             </div>
             <TaskCard
               v-else
               :task="entry.task"
+              :draggable="isProjectManager"
               @click="openEditTaskModal(entry.task)"
             />
           </template>
@@ -500,8 +537,8 @@ function getRequirementProgressText(requirement: Task): string {
     <EmptyState
       v-else
       title="暂无任务"
-      description="创建您的第一个任务开始使用"
-      action-text="创建任务"
+      :description="isProjectManager ? '创建您的第一个任务开始使用' : '暂无任务'"
+      :action-text="isProjectManager ? '创建任务' : ''"
       @action="openNewTaskModal"
     />
 
@@ -653,6 +690,17 @@ function getRequirementProgressText(requirement: Task): string {
   border-radius: var(--radius-md);
   background-color: #f8fafc;
   box-shadow: inset 0 0 0 1px rgba(148, 163, 184, 0.18);
+  transition: background-color var(--transition-fast), border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.requirement-group:hover {
+  background-color: var(--color-bg-secondary);
+  border-color: var(--color-primary);
+  box-shadow: var(--shadow-sm), inset 0 0 0 1px rgba(148, 163, 184, 0.18);
+}
+
+.requirement-group--empty .requirement-group-header {
+  margin-bottom: 0;
 }
 
 .requirement-group-header {
@@ -664,11 +712,37 @@ function getRequirementProgressText(requirement: Task): string {
   cursor: pointer;
 }
 
+.requirement-title-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
 .requirement-group-title {
   font-size: 14px;
   font-weight: 600;
   color: var(--color-text-primary);
   line-height: 1.4;
+}
+
+.requirement-toggle {
+  padding: 2px 8px;
+}
+
+.item-type {
+  font-size: 11px;
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  background-color: #e0f2fe;
+  color: #0369a1;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.item-type.requirement {
+  background-color: #e2e8f0;
+  color: #334155;
 }
 
 .requirement-group-meta {
@@ -694,24 +768,12 @@ function getRequirementProgressText(requirement: Task): string {
   border-left: 2px solid #cbd5e1;
 }
 
-.requirement-collapsed {
-  padding: 10px;
-  border: 1px dashed #cbd5e1;
-  border-radius: var(--radius-sm);
-  color: var(--color-text-secondary);
-  font-size: 13px;
-  text-align: center;
-  background-color: var(--color-bg-primary);
-}
 
-.requirement-empty {
-  padding: 12px;
-  border: 1px dashed #cbd5e1;
-  border-radius: var(--radius-sm);
-  color: var(--color-text-muted);
+.requirement-add-button {
+  min-width: 96px;
+  padding: 7px 12px;
   font-size: 13px;
-  text-align: center;
-  background-color: var(--color-bg-primary);
+  white-space: nowrap;
 }
 
 .btn-sm {

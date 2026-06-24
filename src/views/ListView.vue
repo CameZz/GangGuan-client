@@ -45,6 +45,7 @@ const filters = ref<TaskFilters>({
 })
 
 const selectedPlanningId = computed(() => projectStore.selectedPlanningId)
+const isProjectManager = computed(() => userStore.isAdmin || userStore.currentUser?.role === 'pm')
 
 const isModalOpen = ref(false)
 const selectedTask = ref<Task | null>(null)
@@ -521,7 +522,7 @@ function getRequirementProgressText(task: Task): string {
         </button>
         <span v-if="exportMessage" class="export-message">{{ exportMessage }}</span>
       </div>
-      <button class="btn btn-primary" @click="openNewTaskModal">
+      <button v-if="isProjectManager" class="btn btn-primary" @click="openNewTaskModal">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <path d="M12 5v14M5 12h14" />
         </svg>
@@ -539,6 +540,7 @@ function getRequirementProgressText(task: Task): string {
         <div class="col col-priority sortable" @click="toggleSort('priority')">优先级{{ getSortIcon('priority') }}</div>
         <div class="col col-assignee sortable" @click="toggleSort('assignee')">负责人{{ getSortIcon('assignee') }}</div>
         <div class="col col-due sortable" @click="toggleSort('dueDate')">截止日期{{ getSortIcon('dueDate') }}</div>
+        <div class="col col-action">操作</div>
       </div>
       <div class="table-body">
         <template v-for="entry in listEntries" :key="entry.kind === 'requirement' ? `req-${entry.requirement.id}` : `task-${entry.task.id}`">
@@ -549,6 +551,7 @@ function getRequirementProgressText(task: Task): string {
                   <span class="task-title">{{ entry.requirement.title }}</span>
                   <span class="item-type requirement">需求单</span>
                   <button
+                    v-if="entry.childTasks.length > 0"
                     class="btn btn-ghost btn-sm requirement-toggle"
                     :aria-expanded="!isRequirementCollapsed(entry.requirement.id)"
                     @click.stop="toggleRequirementCollapsed(entry.requirement.id)"
@@ -556,7 +559,6 @@ function getRequirementProgressText(task: Task): string {
                     {{ isRequirementCollapsed(entry.requirement.id) ? '展开' : '折叠' }}
                   </button>
                 </div>
-                <span v-if="entry.requirement.description" class="task-desc">{{ entry.requirement.description }}</span>
                 <span class="task-desc">拆分进度：{{ getRequirementProgressText(entry.requirement) }} · {{ entry.childTasks.length }} 个任务</span>
               </div>
               <div class="col col-status">
@@ -576,6 +578,14 @@ function getRequirementProgressText(task: Task): string {
                 <span class="muted">-</span>
               </div>
               <div class="col col-due">-</div>
+              <div v-if="isProjectManager" class="col col-action">
+                <button class="btn btn-primary requirement-add-button" @click.stop="openChildTaskModal(entry.requirement.id)">
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M12 5v14M5 12h14" />
+                  </svg>
+                  新增任务
+                </button>
+              </div>
             </div>
             <div
               v-if="entry.childTasks.length > 0 && !isRequirementCollapsed(entry.requirement.id)"
@@ -592,7 +602,6 @@ function getRequirementProgressText(task: Task): string {
                     <span class="task-title">{{ childTask.title }}</span>
                     <span class="item-type">任务单</span>
                   </div>
-                  <span v-if="childTask.description" class="task-desc">{{ childTask.description }}</span>
                 </div>
                 <div class="col col-status">
                   <span class="badge" :class="`badge-${childTask.status}`">
@@ -611,15 +620,9 @@ function getRequirementProgressText(task: Task): string {
                   <MemberAvatar :member="getMember(childTask.assigneeId)" size="sm" show-name />
                 </div>
                 <div class="col col-due">{{ formatDate(childTask.dueDate) }}</div>
+                <div class="col col-action"></div>
               </div>
             </div>
-            <div
-              v-else-if="entry.childTasks.length > 0"
-              class="requirement-collapsed-row"
-            >
-              已折叠 {{ entry.childTasks.length }} 个任务
-            </div>
-            <div v-else class="requirement-empty-row">待拆分</div>
           </div>
           <div
             v-else
@@ -633,8 +636,6 @@ function getRequirementProgressText(task: Task): string {
                   {{ getItemTypeLabel(entry.task) }}
                 </span>
               </div>
-              <span v-if="entry.task.description" class="task-desc">{{ entry.task.description }}</span>
-              <span v-if="getParentRequirement(entry.task)" class="task-desc">所属需求：{{ getParentRequirement(entry.task)?.title }}</span>
             </div>
             <div class="col col-status">
               <span class="badge" :class="`badge-${entry.task.status}`">
@@ -653,6 +654,7 @@ function getRequirementProgressText(task: Task): string {
               <MemberAvatar :member="getMember(entry.task.assigneeId)" size="sm" show-name />
             </div>
             <div class="col col-due">{{ formatDate(entry.task.dueDate) }}</div>
+            <div class="col col-action"></div>
           </div>
         </template>
       </div>
@@ -661,8 +663,8 @@ function getRequirementProgressText(task: Task): string {
     <EmptyState
       v-else
       title="暂无任务"
-      description="创建您的第一个任务开始使用"
-      action-text="创建任务"
+      :description="isProjectManager ? '创建您的第一个任务开始使用' : '暂无任务'"
+      :action-text="isProjectManager ? '创建任务' : ''"
       @action="openNewTaskModal"
     />
 
@@ -759,7 +761,7 @@ function getRequirementProgressText(task: Task): string {
 
 .table-header {
   display: flex;
-  padding: 12px 16px;
+  padding: 8px 12px;
   background-color: var(--color-bg-tertiary);
   border-bottom: 1px solid var(--color-border);
   font-size: 12px;
@@ -786,7 +788,8 @@ function getRequirementProgressText(task: Task): string {
 
 .table-row {
   display: flex;
-  padding: 12px 16px;
+  align-items: center;
+  padding: 8px 12px;
   border-bottom: 1px solid var(--color-border);
   cursor: pointer;
   transition: background-color var(--transition-fast);
@@ -801,17 +804,28 @@ function getRequirementProgressText(task: Task): string {
 }
 
 .requirement-list-group {
-  margin: 8px;
+  margin: 6px 8px;
   border: 1px solid #94a3b8;
   border-radius: var(--radius-md);
   background-color: #f8fafc;
   overflow: hidden;
+  transition: background-color var(--transition-fast), border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.requirement-list-group:hover {
+  background-color: var(--color-bg-secondary);
+  border-color: var(--color-primary);
+  box-shadow: var(--shadow-sm);
+}
+
+.requirement-list-group:hover .requirement-row {
+  background-color: var(--color-bg-secondary);
 }
 
 .requirement-list-group + .requirement-list-group,
 .requirement-list-group + .table-row,
 .table-row + .requirement-list-group {
-  margin-top: 8px;
+  margin-top: 6px;
 }
 
 .requirement-row {
@@ -820,52 +834,32 @@ function getRequirementProgressText(task: Task): string {
 }
 
 .requirement-child-rows {
-  padding-left: 20px;
+  padding-left: 14px;
   border-left: 2px solid #cbd5e1;
-  margin-left: 16px;
+  margin-left: 12px;
 }
 
 .child-row {
   background-color: var(--color-bg-primary);
 }
 
-.requirement-empty-row {
-  margin: 8px 12px 12px 36px;
-  padding: 10px;
-  border: 1px dashed #cbd5e1;
-  border-radius: var(--radius-sm);
-  color: var(--color-text-muted);
-  font-size: 13px;
-  text-align: center;
-  background-color: var(--color-bg-primary);
-}
-
-.requirement-collapsed-row {
-  margin: 8px 12px 12px 36px;
-  padding: 10px;
-  border: 1px dashed #cbd5e1;
-  border-radius: var(--radius-sm);
-  color: var(--color-text-secondary);
-  font-size: 13px;
-  text-align: center;
-  background-color: var(--color-bg-primary);
-}
 
 .col {
   display: flex;
   align-items: center;
-  padding: 0 8px;
+  padding: 0 6px;
 }
 
 .col-title {
   flex: 2;
   flex-direction: column;
   align-items: flex-start;
-  gap: 4px;
+  justify-content: center;
+  gap: 2px;
 }
 
 .task-title {
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 500;
   color: var(--color-text-primary);
 }
@@ -897,7 +891,7 @@ function getRequirementProgressText(task: Task): string {
 }
 
 .task-desc {
-  font-size: 12px;
+  font-size: 11px;
   color: var(--color-text-muted);
   white-space: nowrap;
   overflow: hidden;
@@ -933,6 +927,18 @@ function getRequirementProgressText(task: Task): string {
   flex: 0.8;
   font-size: 13px;
   color: var(--color-text-secondary);
+}
+
+.col-action {
+  flex: 0.9;
+  justify-content: flex-end;
+}
+
+.requirement-add-button {
+  min-width: 96px;
+  padding: 7px 12px;
+  font-size: 13px;
+  white-space: nowrap;
 }
 
 .muted {

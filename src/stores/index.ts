@@ -6,6 +6,7 @@ import { useMemberStore } from "./member";
 import { useTaskStore } from "./task";
 import { usePlanningStore } from "./planning";
 import { useUserStore } from "./user";
+import { useNotificationStore } from "./notification";
 import { wsService } from "@/utils/websocket";
 import { getWebSocketUrl, loadAppConfig } from "@/utils/config";
 
@@ -18,6 +19,7 @@ export {
     useTaskStore,
     usePlanningStore,
     useUserStore,
+    useNotificationStore,
 };
 
 // Initialize all stores with API data
@@ -27,6 +29,7 @@ class StoresManager {
     public taskStore: any = null;
     public planningStore: any = null;
     public userStore: any = null;
+    public notificationStore: any = null;
     public isReady = false;
     public isDataReady = false;
     private initPromise: Promise<void> | null = null;
@@ -43,6 +46,7 @@ class StoresManager {
         this.taskStore = useTaskStore();
         this.planningStore = usePlanningStore();
         this.userStore = useUserStore();
+        this.notificationStore = useNotificationStore();
     }
 
     async init(force = false) {
@@ -95,6 +99,9 @@ class StoresManager {
 
             wsService.connect(getWebSocketUrl(), userId);
 
+            // 获取通知未读数
+            this.notificationStore?.fetchUnreadCount?.();
+
             // 页面可见性变化时，通过 REST API 补拉最新任务数据
             this.visibilityHandler = () => {
                 if (document.visibilityState === 'visible') {
@@ -122,6 +129,7 @@ class StoresManager {
         this.memberStore?.clearData?.();
         this.taskStore?.clearData?.();
         this.planningStore?.clearData?.();
+        this.notificationStore?.clearData?.();
         this.connectedUserId = null;
         this.isDataReady = false;
     }

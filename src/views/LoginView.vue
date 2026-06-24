@@ -1,14 +1,34 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useUserStore } from '@/stores'
 
 const router = useRouter()
 const userStore = useUserStore()
 
+const SAVED_EMPLOYEE_ID_KEY = 'gangguan:saved-employee-id'
+
 const employeeId = ref('')
 const password = ref('')
+const saveEmployeeId = ref(false)
 const error = ref('')
+
+onMounted(() => {
+  const savedEmployeeId = localStorage.getItem(SAVED_EMPLOYEE_ID_KEY)
+  if (!savedEmployeeId) return
+
+  employeeId.value = savedEmployeeId
+  saveEmployeeId.value = true
+})
+
+function persistEmployeeId() {
+  if (!saveEmployeeId.value) {
+    localStorage.removeItem(SAVED_EMPLOYEE_ID_KEY)
+    return
+  }
+
+  localStorage.setItem(SAVED_EMPLOYEE_ID_KEY, employeeId.value)
+}
 
 async function handleLogin() {
   error.value = ''
@@ -20,6 +40,7 @@ async function handleLogin() {
 
   const success = await userStore.login(employeeId.value, password.value)
   if (success) {
+    persistEmployeeId()
     // 初始化 WebSocket 和数据
     const { storesManager } = await import('@/stores')
     await storesManager.initDataAndWebSocket()
@@ -60,6 +81,15 @@ async function handleLogin() {
             autocomplete="current-password"
           />
         </div>
+
+        <label class="save-login-option">
+          <input
+            v-model="saveEmployeeId"
+            type="checkbox"
+            class="save-login-checkbox"
+          />
+          <span>保存工号</span>
+        </label>
 
         <div v-if="error" class="error-message">
           {{ error }}
@@ -144,6 +174,23 @@ async function handleLogin() {
 .input:focus {
   outline: none;
   border-color: var(--color-primary);
+}
+
+.save-login-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  user-select: none;
+}
+
+.save-login-checkbox {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--color-primary);
+  cursor: pointer;
 }
 
 .error-message {

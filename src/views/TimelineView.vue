@@ -204,29 +204,6 @@ const getMemberName = (memberId: string): string => {
   return member?.name || '未知'
 }
 
-const assigneePalette = [
-  '#2563eb',
-  '#7c3aed',
-  '#db2777',
-  '#dc2626',
-  '#ea580c',
-  '#ca8a04',
-  '#16a34a',
-  '#059669',
-  '#0891b2',
-  '#4f46e5',
-  '#9333ea',
-  '#475569'
-]
-
-const getAssigneeColor = (assigneeId: string | null): string => {
-  if (!assigneeId) return '#64748b'
-  let hash = 0
-  for (let i = 0; i < assigneeId.length; i++) {
-    hash = (hash * 31 + assigneeId.charCodeAt(i)) | 0
-  }
-  return assigneePalette[Math.abs(hash) % assigneePalette.length]
-}
 
 const getPhaseProgressPercent = (phase: TaskPhase): number => {
   return Math.round(clamp(phase.progress || 0, 0, 100))
@@ -256,7 +233,7 @@ const getPhaseHealthStatus = (phase: ScheduledTaskPhase): PhaseHealthStatus => {
   const elapsedWorkDuration = getEffectiveWorkingMinutes(start, nowDate, workdayConfig.value)
 
   if (progress >= 100) return 'completed'
-  if (now < start.getTime()) return 'not-started'
+  if (now < start.getTime()) return progress > 0 ? 'on-track' : 'not-started'
   if (workDuration <= 0 && now > end.getTime() && isWorkday(nowDate)) return 'overdue'
   if (workDuration > 0 && elapsedWorkDuration > workDuration) return 'overdue'
   return progress >= getExpectedProgress(phase, now) ? 'on-track' : 'behind'
@@ -265,9 +242,17 @@ const getPhaseHealthStatus = (phase: ScheduledTaskPhase): PhaseHealthStatus => {
 const phaseProgressColors: Record<PhaseHealthStatus, string> = {
   'not-started': '#f59e0b',
   'on-track': '#22c55e',
-  behind: '#ef4444',
-  overdue: '#ef4444',
-  completed: '#22c55e'
+  behind: '#dc2626',
+  overdue: '#dc2626',
+  completed: '#16a34a'
+}
+
+const phaseProgressBackgroundColors: Record<PhaseHealthStatus, string> = {
+  'not-started': '#fef3c7',
+  'on-track': '#dcfce7',
+  behind: '#fee2e2',
+  overdue: '#fee2e2',
+  completed: '#dcfce7'
 }
 
 const phaseStatusLabels: Record<PhaseHealthStatus, string> = {
@@ -288,6 +273,10 @@ const getPhaseProgressColor = (phase: ScheduledTaskPhase): string => {
   return phaseProgressColors[getPhaseHealthStatus(phase)]
 }
 
+const getPhaseProgressBackgroundColor = (phase: ScheduledTaskPhase): string => {
+  return phaseProgressBackgroundColors[getPhaseHealthStatus(phase)]
+}
+
 const getPhaseAssigneeName = (phase: ScheduledTaskPhase): string => {
   return phase.assigneeId ? getMemberName(phase.assigneeId) : getMemberName('')
 }
@@ -297,9 +286,8 @@ const getPhaseBarStyle = (phase: ScheduledTaskPhase, index: number) => {
   return {
     ...getBarStyle(phase.startTime, phase.endTime),
     gridRow: `${index + 1}`,
-    borderColor: getAssigneeColor(phase.assigneeId),
-    '--phase-assignee-color': getAssigneeColor(phase.assigneeId),
     '--phase-progress-color': getPhaseProgressColor(phase),
+    '--phase-progress-bg': getPhaseProgressBackgroundColor(phase),
     '--phase-progress': `${progress}%`
   }
 }
@@ -769,8 +757,8 @@ const dayIndexToVisibleCol = computed(() => {
   height: 26px;
   margin: 5px 2px;
   border-radius: var(--radius-sm);
-  border-left: 4px solid var(--phase-assignee-color);
-  background-color: color-mix(in srgb, var(--phase-assignee-color) 14%, var(--color-bg-primary));
+  border-left: 4px solid var(--phase-progress-color);
+  background-color: var(--phase-progress-bg);
   display: flex;
   align-items: center;
   padding: 0 8px;
@@ -792,9 +780,8 @@ const dayIndexToVisibleCol = computed(() => {
   position: absolute;
   inset: 0 auto 0 0;
   width: var(--phase-progress);
-  min-width: 2px;
+  min-width: 0;
   background-color: var(--phase-progress-color);
-  opacity: 0.24;
   border-radius: var(--radius-sm);
   pointer-events: none;
 }
@@ -804,7 +791,7 @@ const dayIndexToVisibleCol = computed(() => {
   height: 8px;
   margin-right: 6px;
   border-radius: 999px;
-  background-color: var(--phase-assignee-color);
+  background-color: var(--phase-progress-color);
   flex-shrink: 0;
   position: relative;
   z-index: 1;

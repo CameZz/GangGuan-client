@@ -50,12 +50,22 @@ export const useTaskStore = defineStore('task', () => {
     return isTaskItem(task) && !task.parentRequirementId
   }
 
+  function getTaskId(task: Task): string {
+    return String(task.id)
+  }
+
+  function findTaskById(id: string | number | null | undefined): Task | null {
+    if (id === null || id === undefined) return null
+    const targetId = String(id)
+    return tasks.value.find(t => getTaskId(t) === targetId) || null
+  }
+
   function getRequirementsByProject(projectId: string): Task[] {
     return tasks.value.filter(t => isRequirement(t) && t.projectId === projectId)
   }
 
   function getChildTasks(requirementId: string): Task[] {
-    return tasks.value.filter(t => isTaskItem(t) && t.parentRequirementId === requirementId)
+    return tasks.value.filter(t => isTaskItem(t) && String(t.parentRequirementId) === String(requirementId))
   }
 
   function getRequirementProgress(requirementId: string): { done: number; total: number } {
@@ -104,6 +114,50 @@ export const useTaskStore = defineStore('task', () => {
     } catch (error) {
       console.error('获取任务列表失败:', error)
     }
+  }
+
+  function extractTaskFromResponse(result: any): Task | null {
+    if (!result || typeof result !== 'object') return null
+    const candidates = [
+      result.task,
+      result.data?.task,
+      result.data,
+      result.result?.task,
+      result.result,
+      result.payload?.task,
+      result.payload,
+      result
+    ]
+    const task = candidates.find(candidate => candidate && typeof candidate === 'object' && (candidate.id || candidate._id))
+    if (!task) return null
+    return task.id ? task : { ...task, id: task._id }
+  }
+
+  function upsertTask(task: Task): Task {
+    const taskId = getTaskId(task)
+    const index = tasks.value.findIndex(t => getTaskId(t) === taskId)
+    if (index !== -1) {
+      tasks.value[index] = task
+    } else {
+      tasks.value.push(task)
+    }
+    return task
+  }
+
+  async function fetchTaskById(id: string, projectId?: string | null): Promise<Task | null> {
+    try {
+      const result = unwrapApiData<any>(await taskApi.getById(id) as any)
+      const task = extractTaskFromResponse(result)
+      if (task) return upsertTask(task)
+    } catch (error) {
+      console.error('获取任务详情失败:', error)
+    }
+
+    if (projectId) {
+      await fetchTasks(projectId)
+    }
+
+    return findTaskById(id)
   }
 
   async function createTask(data: Omit<Task, 'id' | 'createdAt' | 'updatedAt'>): Promise<Task | null> {
@@ -313,6 +367,8 @@ export const useTaskStore = defineStore('task', () => {
     setTasks,
     clearData,
     fetchTasks,
+    fetchTaskById,
+    findTaskById,
     createTask,
     updateTask,
     deleteTask,

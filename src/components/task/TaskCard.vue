@@ -4,9 +4,12 @@ import type { Task } from '@/types'
 import { useMemberStore, useTaskStore } from '@/stores'
 import MemberAvatar from '@/components/member/MemberAvatar.vue'
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   task: Task
-}>()
+  draggable?: boolean
+}>(), {
+  draggable: true
+})
 
 const emit = defineEmits<{
   click: []
@@ -75,19 +78,21 @@ function handleDragStart(e: DragEvent) {
   <div
     class="task-card"
     :class="{ 'task-card--requirement': isRequirement }"
-    draggable="true"
+    :draggable="props.draggable"
     @click="emit('click')"
     @dragstart="handleDragStart"
   >
-    <div class="task-header">
-      <span class="item-type" :class="{ requirement: isRequirement }">
-        {{ isRequirement ? '需求单' : '任务单' }}
-      </span>
-      <span v-if="!isRequirement" class="task-stage">{{ stageLabel }}</span>
-      <span v-else class="task-progress">{{ progressText }}</span>
+    <div v-if="isRequirement" class="task-header">
+      <span class="item-type requirement">需求单</span>
+      <span class="task-progress">{{ progressText }}</span>
     </div>
-    <h4 class="task-title">{{ task.title }}</h4>
-    <p v-if="task.description" class="task-description">{{ task.description }}</p>
+    <div class="task-title-line">
+      <div class="task-title-main">
+        <h4 class="task-title">{{ task.title }}</h4>
+        <span v-if="!isRequirement" class="item-type">任务单</span>
+      </div>
+      <span v-if="!isRequirement" class="task-stage task-stage-title">{{ stageLabel }}</span>
+    </div>
     <div v-if="isRequirement" class="requirement-summary">
       拆分进度：{{ progressText }}
     </div>
@@ -106,7 +111,7 @@ function handleDragStart(e: DragEvent) {
         </svg>
         <span>{{ formattedDueDate }}</span>
       </div>
-      <MemberAvatar v-if="!isRequirement" :member="assignee" size="sm" />
+      <MemberAvatar v-if="!isRequirement" :member="assignee" size="sm" show-name />
     </div>
   </div>
 </template>
@@ -164,6 +169,10 @@ function handleDragStart(e: DragEvent) {
   color: var(--color-text-secondary);
 }
 
+.task-stage-title {
+  flex-shrink: 0;
+}
+
 .task-progress {
   font-size: 11px;
   padding: 2px 6px;
@@ -172,23 +181,27 @@ function handleDragStart(e: DragEvent) {
   color: var(--color-text-secondary);
 }
 
+.task-title-line {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.task-title-main {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .task-title {
+  min-width: 0;
   font-size: 14px;
   font-weight: 500;
   color: var(--color-text-primary);
-  margin-bottom: 4px;
   line-height: 1.4;
-}
-
-.task-description {
-  font-size: 12px;
-  color: var(--color-text-secondary);
-  line-height: 1.4;
-  margin-bottom: 8px;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
 }
 
 .requirement-summary {

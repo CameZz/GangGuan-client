@@ -1,11 +1,12 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useRouter } from 'vue-router'
-import { useUserStore, useProjectStore, storesManager } from '@/stores'
+import { useUserStore, useProjectStore, useNotificationStore, storesManager } from '@/stores'
 
 const router = useRouter()
 const userStore = useUserStore()
 const projectStore = useProjectStore()
+const notificationStore = useNotificationStore()
 
 const isLoggedIn = computed(() => userStore.isLoggedIn)
 const currentUser = computed(() => userStore.currentUser)
@@ -13,6 +14,7 @@ const isAdmin = computed(() => currentUser.value?.isAdmin === true)
 const isProjectManager = computed(() => userStore.isProjectManager)
 const currentProject = computed(() => projectStore.currentProject)
 const selectedPlanningId = computed(() => projectStore.selectedPlanningId)
+const unreadCount = computed(() => notificationStore.unreadCount)
 
 async function handleLogout() {
   await storesManager.logout()
@@ -61,6 +63,13 @@ function getProjectDetailLink(): string {
     </div>
     <div class="header-right">
       <template v-if="isLoggedIn">
+        <router-link to="/messages" class="message-center-btn" title="消息中心">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
+            <path d="M13.73 21a2 2 0 0 1-3.46 0" />
+          </svg>
+          <span v-if="unreadCount > 0" class="unread-badge">{{ unreadCount > 99 ? '99+' : unreadCount }}</span>
+        </router-link>
         <router-link to="/profile" class="user-info">
           <img :src="currentUser?.avatar" :alt="currentUser?.name" class="user-avatar" />
           <span class="user-name">{{ currentUser?.name }}</span>
@@ -199,6 +208,44 @@ function getProjectDetailLink(): string {
   align-items: center;
   gap: 12px;
   flex-shrink: 0;
+}
+
+.message-center-btn {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: var(--radius-md);
+  color: var(--color-text-secondary);
+  text-decoration: none;
+  transition: all var(--transition-fast);
+}
+
+.message-center-btn:hover {
+  background-color: var(--color-bg-tertiary);
+  color: var(--color-text-primary);
+}
+
+.message-center-btn.router-link-active {
+  color: var(--color-primary);
+}
+
+.unread-badge {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 16px;
+  text-align: center;
+  color: white;
+  background-color: #ef4444;
+  border-radius: 8px;
 }
 
 .user-info {
