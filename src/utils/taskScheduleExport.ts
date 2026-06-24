@@ -20,19 +20,15 @@ function formatPlanningDeadline(dateText: string | null): string {
   return `${month}月${day}日`
 }
 
-function formatTaskTitle(task: Task, taskById: Map<string, Task>): string {
-  if (!task.parentRequirementId) return task.title
-  const parent = taskById.get(task.parentRequirementId)
-  return parent ? `${parent.title}-${task.title}` : task.title
+function formatTaskTitle(task: Task): string {
+  return task.title
 }
 
 export function buildTaskScheduleExport(tasks: Task[], options: BuildTaskScheduleExportOptions): string {
-  const taskById = new Map(options.allTasks.map(task => [task.id, task]))
-
   const taskLines = tasks
     .filter(task => task.itemType === 'task')
-    .sort((a, b) => formatTaskTitle(a, taskById).localeCompare(formatTaskTitle(b, taskById), 'zh-CN'))
-    .map((task, index) => `${index + 1}.${formatTaskTitle(task, taskById)}---${options.getStageLabel(task)}`)
+    .sort((a, b) => formatTaskTitle(a).localeCompare(formatTaskTitle(b), 'zh-CN'))
+    .map((task, index) => `${index + 1}.${formatTaskTitle(task)}---${options.getStageLabel(task)}`)
 
   if (taskLines.length === 0) return ''
 

@@ -128,10 +128,27 @@ export function deriveStatusFromPhases(phases: TaskPhase[], fallback: TaskStatus
   return 'todo'
 }
 
+function appendPhaseSuffix(name: string, suffix: string): string {
+  return name.endsWith(suffix) ? name : `${name}${suffix}`
+}
+
+function formatCurrentPhaseLabel(phase: TaskPhase): string {
+  if (phase.progress <= 0) {
+    return phase.name.startsWith('待') ? phase.name : `待${phase.name}`
+  }
+  if (phase.progress >= 100) {
+    return appendPhaseSuffix(phase.name, '完成')
+  }
+  return appendPhaseSuffix(phase.name, '中')
+}
+
 export function getTaskStageLabel(task: Pick<Task, 'phases' | 'stage' | 'status'>): string {
-  const currentPhase = getCurrentTaskPhase(task.phases)
-  if (currentPhase) return currentPhase.name
-  if (task.phases?.length && task.phases.every(phase => phase.progress >= 100)) return '完成'
+  const phases = normalizeTaskPhases(task.phases)
+  const currentPhase = phases.find(phase => phase.progress < 100) || null
+  if (currentPhase) return formatCurrentPhaseLabel(currentPhase)
+  if (phases.length && phases.every(phase => phase.progress >= 100)) {
+    return formatCurrentPhaseLabel(phases[phases.length - 1])
+  }
   const stage = TASK_STAGES.find(item => item.value === task.stage)
   return stage?.label || task.stage
 }

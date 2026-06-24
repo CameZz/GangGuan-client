@@ -2,9 +2,10 @@
 
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import type { TaskApprovalRequest, ApprovalStatus } from '@/types'
+import type { TaskApprovalRequest, ApprovalStatus, Notification } from '@/types'
 import { approvalApi } from '@/api/approvals'
 import { unwrapApiData } from '@/api'
+import { wsService } from '@/utils/websocket'
 
 export const useApprovalStore = defineStore('approval', () => {
   const approvals = ref<TaskApprovalRequest[]>([])
@@ -117,6 +118,13 @@ export const useApprovalStore = defineStore('approval', () => {
     statusFilter.value = 'pending'
     projectFilter.value = 'all'
   }
+
+  // 收到新审批通知时，自动刷新待审数量
+  wsService.on('notification:create', (notification: Notification) => {
+    if (notification.type === 'approval_submitted') {
+      fetchApprovals({ status: 'pending' })
+    }
+  })
 
   return {
     approvals,
