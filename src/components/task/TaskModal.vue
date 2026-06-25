@@ -1119,7 +1119,18 @@ function getProgressDelta(history: TaskProgressHistory): string {
                     <div class="phase-progress-assignee">{{ getPhaseAssignee(phase)?.name || '未分配' }}</div>
                   </div>
                 </div>
-                <span class="phase-progress-value">{{ phase.progress }}%</span>
+                <div class="phase-progress-value-input">
+                  <input
+                    type="number"
+                    min="0"
+                    max="100"
+                    :value="phase.progress"
+                    :disabled="!canEditPhaseProgress(phase)"
+                    @input="updateTaskPhaseProgress(index, Number(($event.target as HTMLInputElement).value))"
+                    @blur="($event.target as HTMLInputElement).value = String(phase.progress)"
+                  />
+                  <span>%</span>
+                </div>
               </div>
               <div class="phase-progress-control">
                 <input
@@ -1789,8 +1800,47 @@ function getProgressDelta(history: TaskProgressHistory): string {
   color: var(--color-text-primary);
 }
 
-.phase-progress-assignee,
-.phase-progress-value {
+.phase-progress-assignee {
+  font-size: 12px;
+  color: var(--color-text-muted);
+}
+
+.phase-progress-value-input {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+.phase-progress-value-input input[type="number"] {
+  width: 48px;
+  padding: 2px 4px;
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  text-align: right;
+  font-size: 13px;
+  background: var(--color-bg);
+  color: var(--color-text);
+  -moz-appearance: textfield;
+}
+
+.phase-progress-value-input input[type="number"]::-webkit-inner-spin-button,
+.phase-progress-value-input input[type="number"]::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+.phase-progress-value-input input[type="number"]:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.phase-progress-value-input input[type="number"]:focus {
+  outline: none;
+  border-color: var(--color-primary);
+}
+
+.phase-progress-value-input span {
   font-size: 12px;
   color: var(--color-text-muted);
 }

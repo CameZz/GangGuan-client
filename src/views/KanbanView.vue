@@ -193,7 +193,9 @@ function buildKanbanEntries(tasks: Task[]): KanbanEntry[] {
   }
 
   return [
-    ...orderedRequirementIds.map(id => groups.get(id)!).filter(Boolean),
+    ...orderedRequirementIds
+      .map(id => groups.get(id)!)
+      .filter((group): group is KanbanRequirementEntry => !!group && group.childTasks.length > 0),
     ...standaloneTasks.map(task => ({ kind: 'task' as const, task }))
   ]
 }

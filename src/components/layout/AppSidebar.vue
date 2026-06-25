@@ -40,6 +40,7 @@ const newPlanningDeadline = ref('')
 const PLANNING_COLORS = ['#6366f1', '#14b8a6', '#f59e0b', '#ec4899', '#8b5cf6', '#22c55e', '#f43f5e', '#06b6d4']
 const newPlanningColor = ref(PLANNING_COLORS[0])
 const editingPlanningId = ref<string | null>(null)
+const editPlanningName = ref('')
 const editPlanningDeadline = ref('')
 const editPlanningColor = ref(PLANNING_COLORS[0])
 const isSavingPlanning = ref(false)
@@ -60,9 +61,13 @@ const plannings = computed(() => {
   return planningStore.plannings.filter((p: Planning) => p.projectId === currentProject.value!.id)
 })
 
-// Check if a planning is completed (all tasks are done)
+// Check if a planning is completed (deadline passed AND all tasks are done)
+// 只检查实际任务（非需求单），需求单状态由子任务推导
 function isPlanningCompleted(planningId: string): boolean {
-  const planningTasks = taskStore.tasks.filter((t: any) => t.planningId === planningId)
+  const planning = plannings.value.find((p: Planning) => p.id === planningId)
+  if (!planning?.deadline) return false
+  if (new Date(planning.deadline) >= new Date()) return false
+  const planningTasks = taskStore.tasks.filter((t: any) => t.planningId === planningId && t.itemType !== 'requirement')
   if (planningTasks.length === 0) return false
   return planningTasks.every((t: any) => t.status === 'done')
 }
@@ -157,22 +162,25 @@ async function createPlanning() {
 function startEditPlanning(planning: Planning) {
   if (!canManagePlanning.value) return
   editingPlanningId.value = planning.id
+  editPlanningName.value = planning.name
   editPlanningDeadline.value = getDateInputValue(planning.deadline)
   editPlanningColor.value = planning.color || PLANNING_COLORS[0]
 }
 
 function cancelEditPlanning() {
   editingPlanningId.value = null
+  editPlanningName.value = ''
   editPlanningDeadline.value = ''
   editPlanningColor.value = PLANNING_COLORS[0]
 }
 
-async function savePlanningDeadline(planning: Planning) {
+async function savePlanning(planning: Planning) {
   if (!canManagePlanning.value) return
   if (isSavingPlanning.value) return
   isSavingPlanning.value = true
   const updated = await planningStore.updatePlanning(planning.id, {
     ...planning,
+    name: editPlanningName.value.trim() || planning.name,
     color: editPlanningColor.value,
     deadline: editPlanningDeadline.value ? new Date(editPlanningDeadline.value).toISOString() : null
   })
@@ -271,6 +279,12 @@ async function savePlanningDeadline(planning: Planning) {
                   </button>
                 </div>
                 <div v-if="canManagePlanning && editingPlanningId === planning.id" class="edit-planning-form" @click.stop>
+                  <input
+                    v-model="editPlanningName"
+                    type="text"
+                    class="input"
+                    placeholder="迭代名称"
+                  />
                   <div class="color-picker">
                     <span
                       v-for="c in PLANNING_COLORS"
@@ -287,7 +301,7 @@ async function savePlanningDeadline(planning: Planning) {
                     class="input"
                   />
                   <div class="form-actions">
-                    <button class="btn btn-primary btn-sm" :disabled="isSavingPlanning" @click="savePlanningDeadline(planning)">
+                    <button class="btn btn-primary btn-sm" :disabled="isSavingPlanning" @click="savePlanning(planning)">
                       保存
                     </button>
                     <button class="btn btn-secondary btn-sm" :disabled="isSavingPlanning" @click="cancelEditPlanning">
@@ -339,6 +353,12 @@ async function savePlanningDeadline(planning: Planning) {
                   </button>
                 </div>
                 <div v-if="canManagePlanning && editingPlanningId === planning.id" class="edit-planning-form" @click.stop>
+                  <input
+                    v-model="editPlanningName"
+                    type="text"
+                    class="input"
+                    placeholder="迭代名称"
+                  />
                   <div class="color-picker">
                     <span
                       v-for="c in PLANNING_COLORS"
@@ -355,7 +375,7 @@ async function savePlanningDeadline(planning: Planning) {
                     class="input"
                   />
                   <div class="form-actions">
-                    <button class="btn btn-primary btn-sm" :disabled="isSavingPlanning" @click="savePlanningDeadline(planning)">
+                    <button class="btn btn-primary btn-sm" :disabled="isSavingPlanning" @click="savePlanning(planning)">
                       保存
                     </button>
                     <button class="btn btn-secondary btn-sm" :disabled="isSavingPlanning" @click="cancelEditPlanning">
