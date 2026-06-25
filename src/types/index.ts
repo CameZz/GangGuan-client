@@ -52,6 +52,7 @@ export interface Project {
   name: string
   description: string
   createdAt: string
+  defaultReviewerId: string | null
   phaseTemplates: ProjectPhaseTemplate[]
   nonWorkdays: string[]    // 应上班但休息的日期（如节假日）
   extraWorkdays: string[]  // 应休息但上班的日期（如加班）
@@ -195,7 +196,7 @@ export interface Task {
 }
 
 // Approval request types
-export type ApprovalStatus = 'pending' | 'approved' | 'rejected'
+export type ApprovalStatus = 'pending' | 'approved' | 'rejected' | 'cancelled'
 
 export interface PhaseSnapshotItem {
   name: string
@@ -216,16 +217,18 @@ export interface TaskApprovalRequest {
   planningId: string | null
   parentRequirementId: string | null
   requesterId: string
+  assignedReviewerId: string | null
   reviewerId: string | null
   // 关联数据（API 返回时包含）
   requester?: { id: string; name: string; avatar: string; role: RoleType }
+  assignedReviewer?: { id: string; name: string; avatar: string; role: RoleType } | null
   reviewer?: { id: string; name: string; avatar: string; role: RoleType } | null
   project?: { id: string; name: string }
   planning?: { id: string; name: string; color: string | null } | null
 }
 
 // Notification types
-export type NotificationType = 'progress_update' | 'behind_progress' | 'comment' | 'reference' | 'approval_submitted' | 'approval_approved' | 'approval_rejected'
+export type NotificationType = 'progress_update' | 'behind_progress' | 'comment' | 'reference' | 'approval_submitted' | 'approval_approved' | 'approval_rejected' | 'approval_cancelled'
 
 export interface Notification {
   id: string

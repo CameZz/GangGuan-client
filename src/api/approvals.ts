@@ -4,7 +4,7 @@ import api from './index'
 
 export const approvalApi = {
   // 提交任务申请
-  create: (data: { title: string; remark: string; phaseSnapshot: { name: string; assigneeId: string | null }[]; projectId: string; planningId: string; parentRequirementId?: string | null }) =>
+  create: (data: { title: string; remark: string; phaseSnapshot: { name: string; assigneeId: string | null }[]; projectId: string; planningId: string; parentRequirementId?: string | null; assignedReviewerId: string }) =>
     api.post('/approvals', data),
 
   // 获取审批列表
@@ -26,5 +26,9 @@ export const approvalApi = {
 
   // 审批驳回
   reject: (id: string, reviewComment: string) =>
-    api.post(`/approvals/${id}/reject`, { reviewComment })
+    api.post(`/approvals/${id}/reject`, { reviewComment }),
+
+  // 取消申请
+  cancel: (id: string) =>
+    api.post(`/approvals/${id}/cancel`)
 }

@@ -9,6 +9,9 @@ const projectStore = useProjectStore()
 const statusFilter = ref<ApprovalStatus | 'all'>('all')
 const projectFilter = ref<string | 'all'>('all')
 
+// 取消确认
+const cancellingId = ref<string | null>(null)
+
 const isLoading = computed(() => approvalStore.isLoading)
 const projects = computed(() => projectStore.projects)
 const approvals = computed(() => approvalStore.approvals)
@@ -16,19 +19,22 @@ const approvals = computed(() => approvalStore.approvals)
 const STATUS_LABELS: Record<ApprovalStatus, string> = {
   pending: '待审批',
   approved: '已通过',
-  rejected: '已驳回'
+  rejected: '已驳回',
+  cancelled: '已取消'
 }
 
 const STATUS_ICONS: Record<ApprovalStatus, string> = {
   pending: '⏳',
   approved: '✅',
-  rejected: '❌'
+  rejected: '❌',
+  cancelled: '🚫'
 }
 
 const STATUS_CLASSES: Record<ApprovalStatus, string> = {
   pending: 'status-pending',
   approved: 'status-approved',
-  rejected: 'status-rejected'
+  rejected: 'status-rejected',
+  cancelled: 'status-cancelled'
 }
 
 function formatTime(dateStr: string): string {
@@ -73,6 +79,21 @@ function handleProjectFilterChange(projectId: string | 'all') {
   fetchApprovals()
 }
 
+// 取消申请
+async function handleCancel(id: string) {
+  if (!confirm('确定要取消此申请吗？')) return
+
+  cancellingId.value = id
+  try {
+    await approvalStore.cancelAction(id)
+  } catch (error: any) {
+    console.error('取消申请失败:', error)
+    alert(error.message || '取消失败，请重试')
+  } finally {
+    cancellingId.value = null
+  }
+}
+
 onMounted(() => {
   fetchApprovals()
 })
@@ -88,7 +109,7 @@ onMounted(() => {
     <div class="filter-bar">
       <div class="status-filters">
         <button
-          v-for="status in (['all', 'pending', 'approved', 'rejected'] as const)"
+          v-for="status in (['all', 'pending', 'approved', 'rejected', 'cancelled'] as const)"
           :key="status"
           class="filter-chip"
           :class="{ active: statusFilter === status }"
@@ -198,6 +219,17 @@ onMounted(() => {
               </span>
             </div>
           </div>
+        </div>
+
+        <!-- 操作按钮 -->
+        <div v-if="approval.status === 'pending'" class="card-actions">
+          <button
+            class="btn btn-danger"
+            :disabled="cancellingId === approval.id"
+            @click="handleCancel(approval.id)"
+          >
+            {{ cancellingId === approval.id ? '取消中...' : '取消申请' }}
+          </button>
         </div>
       </div>
     </div>
@@ -361,6 +393,11 @@ onMounted(() => {
   color: #991b1b;
 }
 
+.status-cancelled {
+  background-color: #f3f4f6;
+  color: #6b7280;
+}
+
 .card-meta {
   display: flex;
   align-items: center;
@@ -472,5 +509,14 @@ onMounted(() => {
   display: block;
   margin-top: 4px;
   color: var(--color-text-secondary);
+}
+
+.card-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  padding: 12px 20px;
+  border-top: 1px solid var(--color-border);
+  background-color: var(--color-bg-secondary);
 }
 </style>

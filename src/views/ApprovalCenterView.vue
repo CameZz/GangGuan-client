@@ -41,19 +41,22 @@ const filteredApprovals = computed(() => {
 const STATUS_LABELS: Record<ApprovalStatus, string> = {
   pending: '待审批',
   approved: '已通过',
-  rejected: '已驳回'
+  rejected: '已驳回',
+  cancelled: '已取消'
 }
 
 const STATUS_ICONS: Record<ApprovalStatus, string> = {
   pending: '⏳',
   approved: '✅',
-  rejected: '❌'
+  rejected: '❌',
+  cancelled: '🚫'
 }
 
 const STATUS_CLASSES: Record<ApprovalStatus, string> = {
   pending: 'status-pending',
   approved: 'status-approved',
-  rejected: 'status-rejected'
+  rejected: 'status-rejected',
+  cancelled: 'status-cancelled'
 }
 
 function getRoleName(role: string): string {

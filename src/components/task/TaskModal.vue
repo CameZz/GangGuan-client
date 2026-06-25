@@ -177,10 +177,19 @@ const childTasks = computed(() => {
 })
 
 const deleteBlockedReason = computed(() => {
-  if (props.task && isRequirementItem.value && childTasks.value.length > 0) {
-    return `该需求单下还有 ${childTasks.value.length} 个任务单，请先移出或删除子任务`
+  if (!props.task) return ''
+  if (isTaskItem.value && form.value.status === 'abandoned') {
+    return '该任务单已是废弃状态'
+  }
+  if (isRequirementItem.value && childTasks.value.length > 0) {
+    return `该需求单下还有 ${childTasks.value.length} 个任务单，请先移出子任务`
   }
   return ''
+})
+
+const deleteActionLabel = computed(() => {
+  if (isTaskItem.value) return form.value.status === 'abandoned' ? '已废弃' : '废弃任务单'
+  return '删除需求单'
 })
 
 const availableMembers = computed(() => {
@@ -1149,7 +1158,7 @@ function getProgressDelta(history: TaskProgressHistory): string {
 
       <div class="modal-footer">
         <div v-if="deleteError || scheduleError" class="delete-error">{{ deleteError || scheduleError }}</div>
-        <button v-if="isEditing && canEditBasicInfo" class="btn btn-danger" :disabled="!!deleteBlockedReason" @click="handleDelete">删除</button>
+        <button v-if="isEditing && canEditBasicInfo" class="btn btn-danger" :disabled="!!deleteBlockedReason" @click="handleDelete">{{ deleteActionLabel }}</button>
         <div class="spacer"></div>
         <button class="btn btn-secondary" @click="emit('close')">取消</button>
         <button class="btn btn-primary" @click="handleSubmit">保存</button>

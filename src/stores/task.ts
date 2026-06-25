@@ -212,7 +212,15 @@ export const useTaskStore = defineStore('task', () => {
 
   async function deleteTask(id: string): Promise<boolean> {
     const task = tasks.value.find(t => t.id === id)
-    if (task && isRequirement(task) && getChildTasks(id).length > 0) {
+    if (!task) return false
+
+    if (isTaskItem(task)) {
+      if (task.status === 'abandoned') return true
+      const updated = await moveTask(id, 'abandoned')
+      return !!updated
+    }
+
+    if (getChildTasks(id).length > 0) {
       return false
     }
 
@@ -221,7 +229,7 @@ export const useTaskStore = defineStore('task', () => {
       tasks.value = tasks.value.filter(t => t.id !== id)
       return true
     } catch (error) {
-      console.error('删除任务失败:', error)
+      console.error('删除需求单失败:', error)
       return false
     }
   }

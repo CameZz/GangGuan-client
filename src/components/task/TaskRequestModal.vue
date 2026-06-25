@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { ref, watch, computed } from 'vue'
-import type { Member } from '@/types'
-import { useMemberStore, useProjectStore, usePlanningStore, useTaskStore } from '@/stores'
+import { ref, watch, computed, onMounted } from 'vue'
+import type { Member, User } from '@/types'
+import { useMemberStore, useProjectStore, usePlanningStore, useTaskStore, useUserStore } from '@/stores'
 
 const props = defineProps<{
   isOpen: boolean
@@ -19,6 +19,7 @@ const emit = defineEmits<{
     projectId: string
     planningId: string
     parentRequirementId?: string | null
+    assignedReviewerId: string
   }]
 }>()
 
@@ -26,8 +27,27 @@ const memberStore = useMemberStore()
 const projectStore = useProjectStore()
 const planningStore = usePlanningStore()
 const taskStore = useTaskStore()
+const userStore = useUserStore()
 
 const members = computed(() => memberStore.members)
+
+// PM/Admin 用户列表（用于审批人选择）
+const pmAndAdminUsers = ref<User[]>([])
+const selectedReviewerId = ref<string>('')
+
+// 加载 PM/Admin 用户列表
+async function loadPmAndAdminUsers() {
+  try {
+    const allUsers = await userStore.getAllUsers()
+    pmAndAdminUsers.value = allUsers.filter(u => u.isAdmin || u.role === 'pm')
+  } catch (error) {
+    console.error('加载审批人列表失败:', error)
+  }
+}
+
+// 获取项目的默认审批人
+const currentProject = computed(() => projectStore.currentProject)
+const defaultReviewerId = computed(() => currentProject.value?.defaultReviewerId || '')
 
 const form = ref({
   title: '',
@@ -40,7 +60,6 @@ const form = ref({
 const selectedPhaseNames = ref<Set<string>>(new Set())
 const phaseAssignments = ref<{ name: string; assigneeId: string | null }[]>([])
 
-const currentProject = computed(() => projectStore.currentProject)
 const currentProjectId = computed(() => props.projectId || currentProject.value?.id)
 
 // 当前项目的迭代列表
@@ -69,6 +88,10 @@ watch(() => props.isOpen, (open) => {
     form.value = { title: '', remark: '', planningId: '', parentRequirementId: '' }
     selectedPhaseNames.value = new Set()
     phaseAssignments.value = []
+    // 设置默认审批人
+    selectedReviewerId.value = defaultReviewerId.value || ''
+    // 加载 PM/Admin 用户列表
+    loadPmAndAdminUsers()
   }
 })
 
@@ -99,6 +122,7 @@ function updateAssignee(index: number, assigneeId: string | null) {
 const titleError = ref('')
 const remarkError = ref('')
 const planningError = ref('')
+const reviewerError = ref('')
 
 function requestClose() {
   if (props.saving) return
@@ -112,6 +136,7 @@ function handleSubmit() {
   titleError.value = ''
   remarkError.value = ''
   planningError.value = ''
+  reviewerError.value = ''
 
   let hasError = false
 
@@ -125,6 +150,10 @@ function handleSubmit() {
   }
   if (!form.value.planningId) {
     planningError.value = '请选择所属迭代'
+    hasError = true
+  }
+  if (!selectedReviewerId.value) {
+    reviewerError.value = '请选择审批人'
     hasError = true
   }
 
@@ -142,7 +171,8 @@ function handleSubmit() {
     })),
     projectId,
     planningId: form.value.planningId,
-    parentRequirementId: form.value.parentRequirementId || null
+    parentRequirementId: form.value.parentRequirementId || null,
+    assignedReviewerId: selectedReviewerId.value
   })
 }
 </script>
@@ -220,6 +250,25 @@ function handleSubmit() {
               </option>
             </select>
           </div>
+        </div>
+
+        <div class="form-group">
+          <label class="label">指定审批人 <span class="required">*</span></label>
+          <select
+            v-model="selectedReviewerId"
+            class="input select"
+            :disabled="saving"
+          >
+            <option value="">请选择审批人</option>
+            <option
+              v-for="user in pmAndAdminUsers"
+              :key="user.id"
+              :value="user.id"
+            >
+              {{ user.name }}（{{ user.role === 'pm' ? 'PM' : '管理员' }}）
+            </option>
+          </select>
+          <span v-if="reviewerError" class="field-error">{{ reviewerError }}</span>
         </div>
 
         <div class="form-group">

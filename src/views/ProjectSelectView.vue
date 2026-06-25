@@ -47,12 +47,18 @@ async function handleProjectCreate(projectData: Partial<Project>) {
     return
   }
 
+  if (!projectData.defaultReviewerId) {
+    createProjectError.value = '请选择默认审批人'
+    return
+  }
+
   createProjectError.value = ''
   isCreatingProject.value = true
 
   const project = await projectStore.createProject({
     name,
     description: projectData.description?.trim() || '',
+    defaultReviewerId: projectData.defaultReviewerId,
     phaseTemplates: createDefaultPhaseTemplates(),
     nonWorkdays: [],
     extraWorkdays: []

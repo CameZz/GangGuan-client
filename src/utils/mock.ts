@@ -286,6 +286,7 @@ const mockProjects: ProjectSeed[] = [
         name: "英勇之地手游",
         description: "手游开发项目，包含策划、美术、程序等多个部门的协作",
         createdAt: "2026-04-20T10:00:00Z",
+        defaultReviewerId: "user-pm-1",
         nonWorkdays: [],
         extraWorkdays: [],
     },
@@ -294,6 +295,7 @@ const mockProjects: ProjectSeed[] = [
         name: "英勇之地端游",
         description: "端游开发项目，包含策划、美术、程序等多个部门的协作",
         createdAt: "2026-04-25T00:00:00Z",
+        defaultReviewerId: "user-pm-1",
         nonWorkdays: [],
         extraWorkdays: [],
     },
@@ -1447,6 +1449,22 @@ export const mockApi = {
     deleteTask: (id: string): boolean => {
         const index = tasks.findIndex((t) => t.id === id);
         if (index === -1) return false;
+
+        const task = tasks[index];
+        if (task.itemType !== "requirement") {
+            if (task.status === "abandoned") return true;
+            tasks[index] = normalizeTask({
+                ...task,
+                status: "abandoned",
+                updatedAt: new Date().toISOString(),
+            });
+            trigger("task:update", tasks[index]);
+            return true;
+        }
+
+        const childCount = tasks.filter((t) => t.itemType !== "requirement" && t.parentRequirementId === id).length;
+        if (childCount > 0) return false;
+
         tasks.splice(index, 1);
         trigger("task:delete", { id });
         return true;

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, watch, computed } from 'vue'
-import type { Project } from '@/types'
+import type { Project, User } from '@/types'
+import { useUserStore } from '@/stores'
 
 const props = defineProps<{
   project?: Project | null
@@ -15,22 +16,45 @@ const emit = defineEmits<{
   delete: [id: string]
 }>()
 
+const userStore = useUserStore()
+
 const form = ref({
   name: '',
-  description: ''
+  description: '',
+  defaultReviewerId: '' as string | null
 })
 
+// PM/Admin 用户列表
+const pmAndAdminUsers = ref<User[]>([])
+
+async function loadPmAndAdminUsers() {
+  try {
+    const allUsers = await userStore.getAllUsers()
+    pmAndAdminUsers.value = allUsers.filter(u => u.isAdmin || u.role === 'pm')
+  } catch (error) {
+    console.error('加载审批人列表失败:', error)
+  }
+}
+
+const reviewerError = ref('')
+
 watch(() => props.isOpen, (open) => {
-  if (open && props.project) {
-    form.value = {
-      name: props.project.name,
-      description: props.project.description
+  if (open) {
+    if (props.project) {
+      form.value = {
+        name: props.project.name,
+        description: props.project.description,
+        defaultReviewerId: props.project.defaultReviewerId || ''
+      }
+    } else {
+      form.value = {
+        name: '',
+        description: '',
+        defaultReviewerId: ''
+      }
     }
-  } else if (open) {
-    form.value = {
-      name: '',
-      description: ''
-    }
+    reviewerError.value = ''
+    loadPmAndAdminUsers()
   }
 })
 
@@ -43,7 +67,19 @@ function requestClose() {
 
 function handleSubmit() {
   if (props.saving) return
-  emit('save', form.value)
+
+  reviewerError.value = ''
+
+  if (!form.value.defaultReviewerId) {
+    reviewerError.value = '请选择默认审批人'
+    return
+  }
+
+  emit('save', {
+    name: form.value.name,
+    description: form.value.description,
+    defaultReviewerId: form.value.defaultReviewerId
+  })
 }
 
 function handleDelete() {
@@ -84,6 +120,24 @@ function handleDelete() {
             :disabled="saving"
           ></textarea>
         </div>
+        <div class="form-group">
+          <label class="label">默认审批人 <span class="required">*</span></label>
+          <select
+            v-model="form.defaultReviewerId"
+            class="input select"
+            :disabled="saving"
+          >
+            <option value="">请选择默认审批人</option>
+            <option
+              v-for="user in pmAndAdminUsers"
+              :key="user.id"
+              :value="user.id"
+            >
+              {{ user.name }}（{{ user.role === 'pm' ? 'PM' : '管理员' }}）
+            </option>
+          </select>
+          <span v-if="reviewerError" class="field-error">{{ reviewerError }}</span>
+        </div>
         <div v-if="error" class="error-message">
           {{ error }}
         </div>
@@ -108,6 +162,17 @@ function handleDelete() {
 .modal-footer {
   display: flex;
   gap: 8px;
+}
+
+.required {
+  color: var(--color-error);
+}
+
+.field-error {
+  display: block;
+  color: var(--color-error);
+  font-size: 12px;
+  margin-top: 4px;
 }
 
 .error-message {

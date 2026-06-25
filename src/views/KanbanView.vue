@@ -375,7 +375,7 @@ function closeRequestModal() {
   requestError.value = ''
 }
 
-async function handleRequestSubmit(data: { title: string; remark: string; phaseSnapshot: { name: string; assigneeId: string | null }[]; projectId: string; planningId: string; parentRequirementId?: string | null }) {
+async function handleRequestSubmit(data: { title: string; remark: string; phaseSnapshot: { name: string; assigneeId: string | null }[]; projectId: string; planningId: string; parentRequirementId?: string | null; assignedReviewerId: string }) {
   requestSaving.value = true
   requestError.value = ''
   try {

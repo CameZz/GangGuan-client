@@ -26,7 +26,8 @@ const NOTIFICATION_TYPE_LABELS: Record<NotificationType, string> = {
   reference: '参考资源通知',
   approval_submitted: '新任务申请',
   approval_approved: '申请已通过',
-  approval_rejected: '申请已驳回'
+  approval_rejected: '申请已驳回',
+  approval_cancelled: '申请已取消'
 }
 
 const NOTIFICATION_TYPE_ICONS: Record<NotificationType, string> = {
@@ -36,7 +37,8 @@ const NOTIFICATION_TYPE_ICONS: Record<NotificationType, string> = {
   reference: '📎',
   approval_submitted: '📝',
   approval_approved: '✅',
-  approval_rejected: '❌'
+  approval_rejected: '❌',
+  approval_cancelled: '🚫'
 }
 
 function getTypeLabel(type: NotificationType): string {

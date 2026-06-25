@@ -123,9 +123,11 @@ export function deriveStageFromPhase(phase: TaskPhase | null, fallback: TaskStag
 export function deriveStatusFromPhases(phases: TaskPhase[], fallback: TaskStatus): TaskStatus {
   if (fallback === 'abandoned') return 'abandoned'
   if (phases.length === 0) return fallback
-  if (phases.every(phase => phase.progress >= 100)) return 'done'
-  if (phases.some(phase => phase.progress > 0)) return 'in-progress'
-  return 'todo'
+
+  const progresses = phases.map(phase => clampProgress(phase.progress))
+  if (progresses.every(progress => progress === 0)) return 'todo'
+  if (progresses.every(progress => progress === 100)) return 'done'
+  return 'in-progress'
 }
 
 function appendPhaseSuffix(name: string, suffix: string): string {

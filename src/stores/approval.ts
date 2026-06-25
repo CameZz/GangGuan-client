@@ -56,6 +56,7 @@ export const useApprovalStore = defineStore('approval', () => {
     projectId: string
     planningId: string
     parentRequirementId?: string | null
+    assignedReviewerId: string
   }): Promise<TaskApprovalRequest | null> {
     try {
       const result = unwrapApiData<{ approval: TaskApprovalRequest }>(
@@ -97,7 +98,7 @@ export const useApprovalStore = defineStore('approval', () => {
   async function rejectRequest(id: string, reviewComment: string): Promise<TaskApprovalRequest | null> {
     try {
       const result = unwrapApiData<{ approval: TaskApprovalRequest }>(
-        await approvalApi.reject(id, reviewComment) 
+        await approvalApi.reject(id, reviewComment)
       )
       if (result?.approval) {
         const index = approvals.value.findIndex(a => a.id === id)
@@ -109,6 +110,25 @@ export const useApprovalStore = defineStore('approval', () => {
       return null
     } catch (error) {
       console.error('审批驳回失败:', error)
+      throw error
+    }
+  }
+
+  async function cancelAction(id: string): Promise<TaskApprovalRequest | null> {
+    try {
+      const result = unwrapApiData<{ approval: TaskApprovalRequest }>(
+        await approvalApi.cancel(id)
+      )
+      if (result?.approval) {
+        const index = approvals.value.findIndex(a => a.id === id)
+        if (index !== -1) {
+          approvals.value[index] = result.approval
+        }
+        return result.approval
+      }
+      return null
+    } catch (error) {
+      console.error('取消申请失败:', error)
       throw error
     }
   }
@@ -139,6 +159,7 @@ export const useApprovalStore = defineStore('approval', () => {
     submitRequest,
     approveRequest,
     rejectRequest,
+    cancelAction,
     clearData
   }
 })
