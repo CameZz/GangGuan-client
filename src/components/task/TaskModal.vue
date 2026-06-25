@@ -1,18 +1,20 @@
 <script setup lang="ts">
 import { ref, watch, computed } from 'vue'
-import type { Task, TaskStatus, TaskPriority, TaskStage, TaskPhase, Reference, Comment, RoleType, TaskHistory, TaskProgressHistory, TaskItemType } from '@/types'
+import type { Task, TaskStatus, TaskPriority, TaskStage, TaskPhase, Reference, Comment, RoleType, TaskHistory, TaskProgressHistory, TaskItemType, ProjectPhaseTemplate } from '@/types'
 import { HISTORY_FIELD_LABELS, ROLES } from '@/types'
 import { useMemberStore, usePlanningStore, useProjectStore, useTaskStore, useUserStore } from '@/stores'
 import { createTaskPhaseFromTemplate, getPhaseStatus, getTaskPhaseProgress, getTaskStageLabel, normalizeTaskPhases } from '@/utils/taskPhases'
 import {
+  formatDateKey,
   formatDateLabel,
   generateWorkSlots,
   getWorkSlotGridRange,
   isWorkday as isScheduleWorkday,
-  localDateTimeInputToIso,
   normalizePhaseDateTime,
-  toLocalDateTimeInputValue,
+  parseTimeToMinutes,
   validatePhaseTimeRange,
+  WORK_SESSIONS,
+  WORK_SLOT_MINUTES,
   WORK_SLOTS_PER_DAY
 } from '@/utils/workingSchedule'
 import MemberAvatar from '@/components/member/MemberAvatar.vue'
@@ -72,7 +74,6 @@ const form = ref({
 const activeTab = ref<'main' | 'phases' | 'progressHistory' | 'children' | 'references' | 'comments' | 'history'>('main')
 const deleteError = ref('')
 const scheduleError = ref('')
-const phaseTemplateToAdd = ref('')
 const selectedPhaseIndex = ref<number | null>(null)
 const editingCommentIndex = ref<number | null>(null)
 const newCommentContent = ref('')
@@ -150,7 +151,6 @@ watch([() => props.isOpen, () => props.task, () => props.initialParentRequiremen
     activeTab.value = 'main'
     deleteError.value = ''
     scheduleError.value = ''
-    phaseTemplateToAdd.value = ''
     selectedPhaseIndex.value = null
     editingCommentIndex.value = null
     newCommentContent.value = ''
@@ -201,10 +201,12 @@ const phaseTemplates = computed(() => {
   return projectStore.getEnabledPhaseTemplates(form.value.projectId)
 })
 
-const availablePhaseTemplates = computed(() => {
-  const selectedTemplateIds = new Set(form.value.phases.map(phase => phase.templateId))
-  return phaseTemplates.value.filter(template => !selectedTemplateIds.has(template.id))
+const sortedPhaseTemplates = computed(() => {
+  return [...phaseTemplates.value].sort((a, b) => a.order - b.order)
 })
+
+const nextPhaseTemplateToAdd = computed(() => getNextPhaseTemplateToAdd())
+const canAddTaskPhase = computed(() => !!nextPhaseTemplateToAdd.value)
 
 const scheduleConfig = computed(() => {
   const project = projectStore.projects.find(project => project.id === form.value.projectId)
@@ -389,24 +391,9 @@ function getSchedulePreviewTooltip(item: PhaseSchedulePreviewItem): string {
   ].join('\n')
 }
 
-function snapIsoToHalfHour(isoValue: string | null): string | null {
-  if (!isoValue) return null
-  const d = new Date(isoValue)
-  if (isNaN(d.getTime())) return isoValue
-  const datePart = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
-  const timePart = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
-  const snapped = snapToHalfHour(`${datePart}T${timePart}`)
-  return new Date(snapped).toISOString()
-}
-
 function handleSubmit() {
   // 服务端会在创建任务时自动生成阶段
   scheduleError.value = ''
-  // 先将表单中的阶段时间 snap 到合法时间点
-  for (const phase of form.value.phases) {
-    phase.startTime = snapIsoToHalfHour(phase.startTime)
-    phase.endTime = snapIsoToHalfHour(phase.endTime)
-  }
   const phases = normalizeTaskPhases(form.value.phases).map(phase => ({
     ...phase,
     startTime: normalizePhaseDateTime(phase.startTime, 'start')?.toISOString() || null,
@@ -417,7 +404,8 @@ function handleSubmit() {
       const error = validatePhaseTimeRange(phase.startTime, phase.endTime, scheduleConfig.value)
       if (error) {
         scheduleError.value = `${phase.name}: ${error}`
-        activeTab.value = 'phases'
+        selectedPhaseIndex.value = form.value.phases.findIndex(item => item.id === phase.id)
+        activeTab.value = 'main'
         return
       }
     }
@@ -527,12 +515,129 @@ async function loadHistories() {
   }
 }
 
+interface WorkTimeOption {
+  value: string
+  label: string
+}
+
+function formatMinutesAsTime(minutes: number): string {
+  return `${String(Math.floor(minutes / 60)).padStart(2, '0')}:${String(minutes % 60).padStart(2, '0')}`
+}
+
+function buildWorkTimeOptions(boundary: 'start' | 'end'): WorkTimeOption[] {
+  const options: WorkTimeOption[] = []
+  for (const session of WORK_SESSIONS) {
+    const start = parseTimeToMinutes(session.start)
+    const end = parseTimeToMinutes(session.end)
+    const first = boundary === 'start' ? start : start + WORK_SLOT_MINUTES
+    const last = boundary === 'start' ? end - WORK_SLOT_MINUTES : end
+    for (let minutes = first; minutes <= last; minutes += WORK_SLOT_MINUTES) {
+      const value = formatMinutesAsTime(minutes)
+      options.push({ value, label: value })
+    }
+  }
+  return options
+}
+
+const phaseStartTimeOptions = buildWorkTimeOptions('start')
+const phaseEndTimeOptions = buildWorkTimeOptions('end')
+
+function getNextPhaseTemplateToAdd(): ProjectPhaseTemplate | null {
+  const templates = sortedPhaseTemplates.value
+  if (templates.length === 0) return null
+  if (form.value.phases.length === 0) return templates[0]
+
+  const usedTemplateIds = new Set(form.value.phases.map(phase => phase.templateId))
+  const lastPhase = form.value.phases[form.value.phases.length - 1]
+  const lastTemplateIndex = templates.findIndex(template => template.id === lastPhase.templateId)
+
+  if (lastTemplateIndex >= 0) {
+    const nextTemplate = templates.slice(lastTemplateIndex + 1).find(template => !usedTemplateIds.has(template.id))
+    if (nextTemplate) return nextTemplate
+  }
+
+  return templates.find(template => !usedTemplateIds.has(template.id)) || null
+}
+
+function isPhaseTemplateUsedByOtherRow(templateId: string, phaseIndex: number): boolean {
+  return form.value.phases.some((phase, index) => index !== phaseIndex && phase.templateId === templateId)
+}
+
+function getPhaseTemplateOptions() {
+  return sortedPhaseTemplates.value
+}
+
+function createScheduleDaySlots(from: Date, days = 45) {
+  const start = new Date(from.getFullYear(), from.getMonth(), from.getDate())
+  return Array.from({ length: days }, (_, dayIndex) => {
+    const date = new Date(start)
+    date.setDate(start.getDate() + dayIndex)
+    return { date, dayIndex }
+  })
+}
+
+function findNextWorkSlot(after: Date) {
+  const slots = generateWorkSlots(createScheduleDaySlots(after), scheduleConfig.value)
+  return slots.find(slot => slot.start.getTime() >= after.getTime()) || null
+}
+
+function getDefaultPhaseSchedule() {
+  const previousPhase = form.value.phases[form.value.phases.length - 1]
+  const previousEnd = previousPhase ? normalizePhaseDateTime(previousPhase.endTime, 'end') : null
+  const searchFrom = previousEnd ? new Date(previousEnd.getTime() + 1) : new Date()
+  const slot = findNextWorkSlot(searchFrom)
+  if (!slot) return null
+  // 默认结束时间为当天最后一个工作时段的结束时间（18:30）
+  const dayEnd = new Date(slot.date)
+  const lastSessionEnd = WORK_SESSIONS[WORK_SESSIONS.length - 1].end
+  const [endHour, endMinute] = lastSessionEnd.split(':').map(Number)
+  dayEnd.setHours(endHour, endMinute, 0, 0)
+  const endTime = slot.start.getTime() >= dayEnd.getTime()
+    ? slot.end.toISOString()
+    : dayEnd.toISOString()
+  return {
+    startTime: slot.start.toISOString(),
+    endTime
+  }
+}
+
+function updateDueDateFromPhases() {
+  if (!form.value.phases.length) return
+  let latestEnd: Date | null = null
+  for (const phase of form.value.phases) {
+    const end = normalizePhaseDateTime(phase.endTime, 'end')
+    if (end && (!latestEnd || end.getTime() > latestEnd.getTime())) {
+      latestEnd = end
+    }
+  }
+  if (latestEnd) {
+    form.value.dueDate = formatDateKey(latestEnd)
+  }
+}
+
 function addTaskPhase() {
-  const template = phaseTemplates.value.find(item => item.id === phaseTemplateToAdd.value)
+  const template = nextPhaseTemplateToAdd.value
   if (!template) return
-  form.value.phases.push(createTaskPhaseFromTemplate(template, form.value.phases.length))
+  const phase = createTaskPhaseFromTemplate(template, form.value.phases.length)
+  const schedule = getDefaultPhaseSchedule()
+  if (schedule) {
+    phase.startTime = schedule.startTime
+    phase.endTime = schedule.endTime
+  }
+  form.value.phases.push(phase)
   selectedPhaseIndex.value = form.value.phases.length - 1
-  phaseTemplateToAdd.value = ''
+  updateDueDateFromPhases()
+}
+
+function updateTaskPhaseTemplate(index: number, templateId: string) {
+  const template = sortedPhaseTemplates.value.find(item => item.id === templateId)
+  if (!template || isPhaseTemplateUsedByOtherRow(template.id, index)) return
+  selectedPhaseIndex.value = index
+  form.value.phases[index] = {
+    ...form.value.phases[index],
+    templateId: template.id,
+    name: template.name
+  }
 }
 
 function removeTaskPhase(index: number) {
@@ -543,6 +648,7 @@ function removeTaskPhase(index: number) {
     selectedPhaseIndex.value--
   }
   reorderTaskPhases()
+  updateDueDateFromPhases()
 }
 
 function moveTaskPhase(index: number, direction: 'up' | 'down') {
@@ -567,66 +673,51 @@ function updateTaskPhaseAssignee(index: number, assigneeId: string) {
   form.value.phases[index].assigneeId = assigneeId || null
 }
 
-function snapToHalfHour(dateTimeValue: string): string {
-  if (!dateTimeValue) return dateTimeValue
-  const [datePart, timePart] = dateTimeValue.split('T')
-  if (!timePart) return dateTimeValue
-  let [h, m] = timePart.split(':').map(Number)
-  const totalMin = h * 60 + m
-  const lowerBound = 9 * 60 + 30   // 09:30
-  const upperBound = 18 * 60 + 30  // 18:30
-  const lunchStart = 12 * 60 + 30  // 12:30
-  const lunchEnd = 14 * 60         // 14:00
-  let snapped: number
-  if (totalMin <= lowerBound) {
-    snapped = lowerBound
-  } else if (totalMin >= upperBound) {
-    snapped = upperBound
-  } else if (totalMin > lunchStart && totalMin < lunchEnd) {
-    // 午休时间段内，吸附到更近的端点
-    snapped = (totalMin - lunchStart) <= (lunchEnd - totalMin) ? lunchStart : lunchEnd
-  } else {
-    snapped = Math.round(totalMin / 30) * 30
-  }
-  const sh = String(Math.floor(snapped / 60)).padStart(2, '0')
-  const sm = String(snapped % 60).padStart(2, '0')
-  return `${datePart}T${sh}:${sm}`
+function getPhaseDateInputValue(value: string | null, boundary: 'start' | 'end'): string {
+  const date = normalizePhaseDateTime(value, boundary)
+  return date ? formatDateKey(date) : ''
 }
 
-function updateTaskPhaseStartTime(index: number, dateTimeValue: string) {
-  selectedPhaseIndex.value = index
-  form.value.phases[index].startTime = localDateTimeInputToIso(snapToHalfHour(dateTimeValue))
+function getPhaseTimeInputValue(value: string | null, boundary: 'start' | 'end'): string {
+  const date = normalizePhaseDateTime(value, boundary)
+  return date ? formatMinutesAsTime(date.getHours() * 60 + date.getMinutes()) : ''
 }
 
-function updateTaskPhaseEndTime(index: number, dateTimeValue: string) {
-  selectedPhaseIndex.value = index
-  form.value.phases[index].endTime = localDateTimeInputToIso(snapToHalfHour(dateTimeValue))
+function getDefaultDateValue(): string {
+  const slot = findNextWorkSlot(new Date())
+  return formatDateKey(slot?.start || new Date())
 }
 
-function handlePhaseStartFocus(index: number, e: FocusEvent) {
-  selectedPhaseIndex.value = index
-  const input = e.target as HTMLInputElement
-  if (!input.value) {
-    const today = new Date()
-    const y = today.getFullYear()
-    const m = String(today.getMonth() + 1).padStart(2, '0')
-    const d = String(today.getDate()).padStart(2, '0')
-    input.value = `${y}-${m}-${d}T09:30`
-    updateTaskPhaseStartTime(index, input.value)
-  }
+function getDefaultBoundaryTime(boundary: 'start' | 'end'): string {
+  return boundary === 'start' ? phaseStartTimeOptions[0]?.value || '09:30' : phaseEndTimeOptions[phaseEndTimeOptions.length - 1]?.value || '18:30'
 }
 
-function handlePhaseEndFocus(index: number, e: FocusEvent) {
+function updateTaskPhaseScheduleValue(index: number, boundary: 'start' | 'end', dateValue: string, timeValue: string) {
   selectedPhaseIndex.value = index
-  const input = e.target as HTMLInputElement
-  if (!input.value) {
-    const today = new Date()
-    const y = today.getFullYear()
-    const m = String(today.getMonth() + 1).padStart(2, '0')
-    const d = String(today.getDate()).padStart(2, '0')
-    input.value = `${y}-${m}-${d}T18:30`
-    updateTaskPhaseEndTime(index, input.value)
-  }
+  form.value.phases[index][boundary === 'start' ? 'startTime' : 'endTime'] = dateValue && timeValue
+    ? new Date(`${dateValue}T${timeValue}`).toISOString()
+    : null
+  updateDueDateFromPhases()
+}
+
+function updateTaskPhaseScheduleDate(index: number, boundary: 'start' | 'end', dateValue: string) {
+  const phase = form.value.phases[index]
+  const currentValue = boundary === 'start' ? phase.startTime : phase.endTime
+  const timeValue = getPhaseTimeInputValue(currentValue, boundary) || getDefaultBoundaryTime(boundary)
+  updateTaskPhaseScheduleValue(index, boundary, dateValue, timeValue)
+}
+
+function updateTaskPhaseScheduleTime(index: number, boundary: 'start' | 'end', timeValue: string) {
+  const phase = form.value.phases[index]
+  const currentValue = boundary === 'start' ? phase.startTime : phase.endTime
+  const dateValue = getPhaseDateInputValue(currentValue, boundary) || getDefaultDateValue()
+  updateTaskPhaseScheduleValue(index, boundary, dateValue, timeValue)
+}
+
+function getPhaseScheduleError(index: number): string | null {
+  const phase = form.value.phases[index]
+  if (!phase) return null
+  return validatePhaseTimeRange(phase.startTime, phase.endTime, scheduleConfig.value)
 }
 
 function updateTaskPhaseProgress(index: number, progress: number) {
@@ -801,15 +892,8 @@ function getProgressDelta(history: TaskProgressHistory): string {
               <div class="phase-plan-summary">
                 <span>当前：{{ currentPhaseLabel }}</span>
                 <span>{{ phaseProgress.done }}/{{ phaseProgress.total }} · {{ phaseProgress.percent }}%</span>
-              </div>
-              <div v-if="canEditBasicInfo" class="phase-add-row">
-                <select v-model="phaseTemplateToAdd" class="input select">
-                  <option value="">选择阶段</option>
-                  <option v-for="template in availablePhaseTemplates" :key="template.id" :value="template.id">
-                    {{ template.name }}
-                  </option>
-                </select>
-                <button class="btn btn-secondary btn-sm" :disabled="!phaseTemplateToAdd" @click="addTaskPhase">添加阶段</button>
+                <button v-if="canEditBasicInfo" class="btn btn-primary btn-sm phase-add-button" :disabled="!canAddTaskPhase" @click="addTaskPhase">+ 添加阶段</button>
+                <span v-if="canEditBasicInfo && !canAddTaskPhase" class="phase-add-hint">暂无可添加阶段</span>
               </div>
               <div class="phase-plan-list">
                 <div
@@ -821,7 +905,22 @@ function getProgressDelta(history: TaskProgressHistory): string {
                 >
                   <div class="phase-order">{{ index + 1 }}</div>
                   <div class="phase-main">
-                    <div class="phase-title">{{ phase.name }}</div>
+                    <select
+                      :value="phase.templateId"
+                      class="input select phase-template-select"
+                      :disabled="!canEditBasicInfo"
+                      @focus="selectedPhaseIndex = index"
+                      @change="updateTaskPhaseTemplate(index, ($event.target as HTMLSelectElement).value)"
+                    >
+                      <option
+                        v-for="template in getPhaseTemplateOptions()"
+                        :key="template.id"
+                        :value="template.id"
+                        :disabled="isPhaseTemplateUsedByOtherRow(template.id, index)"
+                      >
+                        {{ template.name }}
+                      </option>
+                    </select>
                     <div class="phase-progress-text">{{ phase.progress }}%</div>
                   </div>
                   <select
@@ -837,28 +936,53 @@ function getProgressDelta(history: TaskProgressHistory): string {
                     </option>
                   </select>
                   <div class="phase-time-range">
-                    <input
-                      type="datetime-local"
-                      step="1800"
-                      class="input"
-                      :value="toLocalDateTimeInputValue(phase.startTime, 'start')"
-                      :disabled="!canEditBasicInfo"
-                      @focus="handlePhaseStartFocus(index, $event)"
-                      @change="updateTaskPhaseStartTime(index, ($event.target as HTMLInputElement).value)"
-                      placeholder="开始时间"
-                    />
+                    <div class="phase-time-group">
+                      <input
+                        type="date"
+                        class="input phase-date-input"
+                        :value="getPhaseDateInputValue(phase.startTime, 'start')"
+                        :disabled="!canEditBasicInfo"
+                        @focus="selectedPhaseIndex = index"
+                        @change="updateTaskPhaseScheduleDate(index, 'start', ($event.target as HTMLInputElement).value)"
+                      />
+                      <select
+                        class="input select phase-time-select"
+                        :value="getPhaseTimeInputValue(phase.startTime, 'start')"
+                        :disabled="!canEditBasicInfo"
+                        @focus="selectedPhaseIndex = index"
+                        @change="updateTaskPhaseScheduleTime(index, 'start', ($event.target as HTMLSelectElement).value)"
+                      >
+                        <option value="">开始</option>
+                        <option v-for="option in phaseStartTimeOptions" :key="`start-${option.value}`" :value="option.value">
+                          {{ option.label }}
+                        </option>
+                      </select>
+                    </div>
                     <span class="time-separator">至</span>
-                    <input
-                      type="datetime-local"
-                      step="1800"
-                      class="input"
-                      :value="toLocalDateTimeInputValue(phase.endTime, 'end')"
-                      :disabled="!canEditBasicInfo"
-                      @focus="handlePhaseEndFocus(index, $event)"
-                      @change="updateTaskPhaseEndTime(index, ($event.target as HTMLInputElement).value)"
-                      placeholder="结束时间"
-                    />
+                    <div class="phase-time-group">
+                      <input
+                        type="date"
+                        class="input phase-date-input"
+                        :value="getPhaseDateInputValue(phase.endTime, 'end')"
+                        :disabled="!canEditBasicInfo"
+                        @focus="selectedPhaseIndex = index"
+                        @change="updateTaskPhaseScheduleDate(index, 'end', ($event.target as HTMLInputElement).value)"
+                      />
+                      <select
+                        class="input select phase-time-select"
+                        :value="getPhaseTimeInputValue(phase.endTime, 'end')"
+                        :disabled="!canEditBasicInfo"
+                        @focus="selectedPhaseIndex = index"
+                        @change="updateTaskPhaseScheduleTime(index, 'end', ($event.target as HTMLSelectElement).value)"
+                      >
+                        <option value="">结束</option>
+                        <option v-for="option in phaseEndTimeOptions" :key="`end-${option.value}`" :value="option.value">
+                          {{ option.label }}
+                        </option>
+                      </select>
+                    </div>
                   </div>
+                  <div v-if="getPhaseScheduleError(index)" class="phase-row-error">{{ getPhaseScheduleError(index) }}</div>
                   <div v-if="canEditBasicInfo" class="phase-row-actions">
                     <button
                       class="btn btn-ghost phase-icon-button"
@@ -1282,19 +1406,22 @@ function getProgressDelta(history: TaskProgressHistory): string {
 
 .phase-plan-summary {
   display: flex;
-  justify-content: space-between;
+  align-items: center;
   gap: 12px;
   font-size: 13px;
   color: var(--color-text-secondary);
 }
 
-.phase-add-row {
-  display: flex;
-  gap: 8px;
+.phase-add-button {
+  margin-left: auto;
+  padding: 5px 14px;
+  font-size: 13px;
+  font-weight: 600;
 }
 
-.phase-add-row .select {
-  flex: 1;
+.phase-add-hint {
+  font-size: 12px;
+  color: var(--color-text-muted);
 }
 
 .phase-plan-list,
@@ -1306,7 +1433,7 @@ function getProgressDelta(history: TaskProgressHistory): string {
 
 .phase-plan-row {
   display: grid;
-  grid-template-columns: 30px minmax(120px, 1fr) 132px minmax(290px, 340px) 92px;
+  grid-template-columns: 30px minmax(150px, 1fr) 132px minmax(360px, 420px) 92px;
   align-items: center;
   gap: 8px;
   padding: 8px;
@@ -1337,9 +1464,9 @@ function getProgressDelta(history: TaskProgressHistory): string {
 }
 
 .phase-main {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  justify-content: space-between;
   gap: 8px;
   min-width: 0;
 }
@@ -1352,6 +1479,13 @@ function getProgressDelta(history: TaskProgressHistory): string {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.phase-template-select {
+  width: 100%;
+  min-width: 0;
+  padding-left: 8px;
+  padding-right: 24px;
 }
 
 .phase-progress-text {
@@ -1382,12 +1516,31 @@ function getProgressDelta(history: TaskProgressHistory): string {
   min-width: 0;
 }
 
-.phase-time-range .input {
+.phase-time-group {
+  display: grid;
+  grid-template-columns: minmax(118px, 1fr) 72px;
+  gap: 4px;
+  min-width: 0;
+}
+
+.phase-date-input,
+.phase-time-select {
   width: 100%;
   min-width: 0;
   padding-left: 8px;
   padding-right: 8px;
   font-size: 12px;
+}
+
+.phase-time-select {
+  padding-right: 22px;
+}
+
+.phase-row-error {
+  grid-column: 4 / -1;
+  margin-top: -2px;
+  font-size: 12px;
+  color: var(--color-error);
 }
 
 .time-separator {
@@ -1529,7 +1682,8 @@ function getProgressDelta(history: TaskProgressHistory): string {
     grid-template-columns: 30px minmax(0, 1fr) 132px 92px;
   }
 
-  .phase-time-range {
+  .phase-time-range,
+  .phase-row-error {
     grid-column: 2 / 5;
   }
 }
@@ -1555,9 +1709,18 @@ function getProgressDelta(history: TaskProgressHistory): string {
   }
 
   .phase-assignee-select,
-  .phase-time-range {
+  .phase-time-range,
+  .phase-row-error {
     grid-column: 2 / 4;
     width: 100%;
+  }
+
+  .phase-time-range {
+    grid-template-columns: 1fr;
+  }
+
+  .time-separator {
+    display: none;
   }
 
   .phase-row-actions {
@@ -2087,3 +2250,17 @@ function getProgressDelta(history: TaskProgressHistory): string {
   vertical-align: middle;
 }
 </style>
+
+
+
+
+
+
+
+
+
+
+
+
+
+

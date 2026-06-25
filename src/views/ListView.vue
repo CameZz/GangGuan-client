@@ -735,17 +735,24 @@ function getRequirementProgressText(task: Task): string {
 <style scoped>
 .list-page {
   width: 100%;
+  padding-top: 12px;
+  padding-bottom: 12px;
 }
 
 .page-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 24px;
+  margin-bottom: 10px;
 }
 
 .header-content {
   flex: 1;
+}
+
+:deep(.task-filter) {
+  padding: 8px;
+  margin-bottom: 8px;
 }
 
 .abandoned-toggle {
@@ -832,7 +839,7 @@ function getRequirementProgressText(task: Task): string {
 }
 
 .table-body {
-  max-height: calc(100vh - 300px);
+  max-height: calc(100vh - 260px);
   overflow-y: auto;
 }
 

@@ -611,17 +611,24 @@ function getRequirementProgressText(requirement: Task): string {
   height: calc(100vh - 64px);
   display: flex;
   flex-direction: column;
+  padding-top: 12px;
+  padding-bottom: 12px;
 }
 
 .page-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 24px;
+  margin-bottom: 10px;
 }
 
 .header-content {
   flex: 1;
+}
+
+:deep(.task-filter) {
+  padding: 8px;
+  margin-bottom: 8px;
 }
 
 .abandoned-toggle {
@@ -695,7 +702,7 @@ function getRequirementProgressText(requirement: Task): string {
   flex-direction: column;
   background-color: var(--color-bg-tertiary);
   border-radius: var(--radius-lg);
-  padding: 12px;
+  padding: 8px;
   min-height: 400px;
 }
 
@@ -703,8 +710,8 @@ function getRequirementProgressText(requirement: Task): string {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 8px 12px;
-  margin-bottom: 12px;
+  padding: 4px 8px;
+  margin-bottom: 6px;
 }
 
 .column-title {
