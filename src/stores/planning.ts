@@ -29,7 +29,7 @@ export const usePlanningStore = defineStore('planning', () => {
   async function fetchPlannings(projectId: string): Promise<void> {
     try {
       const result = unwrapApiData<{ plannings: Planning[] }>(
-        await planningApi.getByProject(projectId) as any
+        await planningApi.getByProject(projectId) 
       )
       if (result?.plannings) {
         // 合并到现有数据，避免覆盖其他项目的 plannings
@@ -53,7 +53,7 @@ export const usePlanningStore = defineStore('planning', () => {
 
   async function createPlanning(projectId: string, data: Omit<Planning, 'id' | 'createdAt'>): Promise<Planning | null> {
     try {
-      const result = unwrapApiData<{ planning: Planning }>(await planningApi.create(projectId, data) as any)
+      const result = unwrapApiData<{ planning: Planning }>(await planningApi.create(projectId, data) )
       if (result?.planning) {
         const planning = result.planning
         if (!plannings.value.find(p => p.id === planning.id)) {
@@ -76,7 +76,7 @@ export const usePlanningStore = defineStore('planning', () => {
       const result = unwrapApiData<{ planning: Planning }>(await planningApi.update(id, {
         ...data,
         projectId
-      }) as any)
+      }) )
       if (result?.planning) {
         const planning = result.planning
         const index = plannings.value.findIndex(p => p.id === id)

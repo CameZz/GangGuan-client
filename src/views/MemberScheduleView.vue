@@ -208,7 +208,7 @@ async function loadDailyNotes() {
   const endDate = formatDateKey(timelineEnd.value)
   try {
     const data = unwrapApiData<{ notes: DailyNote[] }>(
-      await dailyNoteApi.getByDateRange(currentProjectId.value, startDate, endDate) as any
+      await dailyNoteApi.getByDateRange(currentProjectId.value, startDate, endDate) 
     )
     dailyNotesData.value = data?.notes || []
   } catch (error) {

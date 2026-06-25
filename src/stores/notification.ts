@@ -24,7 +24,7 @@ export const useNotificationStore = defineStore('notification', () => {
     isLoading.value = true
     try {
       const data = unwrapApiData<{ notifications: Notification[] }>(
-        await notificationApi.list({ unread: options?.unread }) as any
+        await notificationApi.list({ unread: options?.unread }) 
       )
       if (data?.notifications) {
         notifications.value = data.notifications
@@ -39,7 +39,7 @@ export const useNotificationStore = defineStore('notification', () => {
   async function fetchUnreadCount(): Promise<void> {
     try {
       const data = unwrapApiData<{ count: number }>(
-        await notificationApi.unreadCount() as any
+        await notificationApi.unreadCount() 
       )
       if (data?.count !== undefined) {
         unreadCount.value = data.count
@@ -52,7 +52,7 @@ export const useNotificationStore = defineStore('notification', () => {
   async function markRead(id: string): Promise<void> {
     try {
       const data = unwrapApiData<{ notification: Notification }>(
-        await notificationApi.markRead(id) as any
+        await notificationApi.markRead(id) 
       )
       if (data?.notification) {
         const index = notifications.value.findIndex(n => n.id === id)

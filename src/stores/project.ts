@@ -61,7 +61,7 @@ export const useProjectStore = defineStore('project', () => {
   async function init() {
     isLoading.value = true
     try {
-      const data = unwrapApiData<{ projects: Project[] }>(await projectApi.getAll() as any)
+      const data = unwrapApiData<{ projects: Project[] }>(await projectApi.getAll() )
       projects.value = dedupeProjects(data?.projects || [])
     } catch (error) {
       console.error('获取项目列表失败:', error)
@@ -98,7 +98,7 @@ export const useProjectStore = defineStore('project', () => {
 
   async function createProject(data: Omit<Project, 'id' | 'createdAt'>): Promise<Project | null> {
     try {
-      const result = unwrapApiData<{ project: Project }>(await projectApi.create(data) as any)
+      const result = unwrapApiData<{ project: Project }>(await projectApi.create(data) )
       if (result?.project) {
         const project = result.project
         upsertProject(project)
@@ -113,7 +113,7 @@ export const useProjectStore = defineStore('project', () => {
 
   async function updateProject(id: string, data: Partial<Project>): Promise<Project | null> {
     try {
-      const result = unwrapApiData<{ project: Project }>(await projectApi.update(id, data) as any)
+      const result = unwrapApiData<{ project: Project }>(await projectApi.update(id, data) )
       if (result?.project) {
         const project = result.project
         upsertProject(project)
@@ -137,7 +137,7 @@ export const useProjectStore = defineStore('project', () => {
 
     try {
       const data = unwrapApiData<{ template: ProjectPhaseTemplate }>(
-        await projectApi.addPhaseTemplate(projectId, { name: trimmedName }) as any
+        await projectApi.addPhaseTemplate(projectId, { name: trimmedName }) 
       )
 
       if (data?.template) {
@@ -173,7 +173,7 @@ export const useProjectStore = defineStore('project', () => {
 
     try {
       const data = unwrapApiData<{ templates: ProjectPhaseTemplate[] }>(
-        await projectApi.reorderPhaseTemplates(projectId, templateIds) as any
+        await projectApi.reorderPhaseTemplates(projectId, templateIds) 
       )
 
       if (data?.templates) {

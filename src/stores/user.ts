@@ -36,7 +36,7 @@ export const useUserStore = defineStore('user', () => {
     initPromise = (async () => {
       isLoading.value = true
       try {
-        const data = unwrapApiData<{ user: User }>(await authApi.me() as any)
+        const data = unwrapApiData<{ user: User }>(await authApi.me() )
         currentUser.value = data?.user ? normalizeUser(data.user) : null
       } catch {
         currentUser.value = null
@@ -53,7 +53,7 @@ export const useUserStore = defineStore('user', () => {
 
   async function login(employeeId: string, password: string): Promise<boolean> {
     try {
-      const data = unwrapApiData<{ user: User }>(await authApi.login(employeeId, password) as any)
+      const data = unwrapApiData<{ user: User }>(await authApi.login(employeeId, password) )
       if (data?.user) {
         currentUser.value = normalizeUser(data.user)
         hasInitialized.value = true
@@ -82,7 +82,7 @@ export const useUserStore = defineStore('user', () => {
     if (!currentUser.value.isAdmin && currentUser.value.id !== id) return null
 
     try {
-      const result = unwrapApiData<{ user: User }>(await userApi.update(id, data) as any)
+      const result = unwrapApiData<{ user: User }>(await userApi.update(id, data) )
       if (result?.user) {
         if (currentUser.value.id === id) {
           currentUser.value = normalizeUser(result.user)
@@ -115,7 +115,7 @@ export const useUserStore = defineStore('user', () => {
     if (!currentUser.value?.isAdmin) return null
 
     try {
-      const result = unwrapApiData<{ user: User }>(await userApi.create(data) as any)
+      const result = unwrapApiData<{ user: User }>(await userApi.create(data) )
       return result?.user || null
     } catch (error) {
       console.error('创建用户失败:', error)
@@ -137,7 +137,7 @@ export const useUserStore = defineStore('user', () => {
 
   async function getAllUsers(): Promise<User[]> {
     try {
-      const data = unwrapApiData<{ users: User[] }>(await userApi.getAll() as any)
+      const data = unwrapApiData<{ users: User[] }>(await userApi.getAll() )
       return data?.users || []
     } catch (error) {
       console.error('获取用户列表失败:', error)

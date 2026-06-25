@@ -37,7 +37,7 @@ export const useApprovalStore = defineStore('approval', () => {
         await approvalApi.list({
           status: statusFilter.value,
           projectId: projectFilter.value
-        }) as any
+        })
       )
       if (data?.approvals) {
         approvals.value = data.approvals
@@ -59,7 +59,7 @@ export const useApprovalStore = defineStore('approval', () => {
   }): Promise<TaskApprovalRequest | null> {
     try {
       const result = unwrapApiData<{ approval: TaskApprovalRequest }>(
-        await approvalApi.create(data) as any
+        await approvalApi.create(data) 
       )
       if (result?.approval) {
         // 如果当前筛选条件包含该状态，添加到列表
@@ -78,7 +78,7 @@ export const useApprovalStore = defineStore('approval', () => {
   async function approveRequest(id: string): Promise<TaskApprovalRequest | null> {
     try {
       const result = unwrapApiData<{ approval: TaskApprovalRequest }>(
-        await approvalApi.approve(id) as any
+        await approvalApi.approve(id) 
       )
       if (result?.approval) {
         const index = approvals.value.findIndex(a => a.id === id)
@@ -97,7 +97,7 @@ export const useApprovalStore = defineStore('approval', () => {
   async function rejectRequest(id: string, reviewComment: string): Promise<TaskApprovalRequest | null> {
     try {
       const result = unwrapApiData<{ approval: TaskApprovalRequest }>(
-        await approvalApi.reject(id, reviewComment) as any
+        await approvalApi.reject(id, reviewComment) 
       )
       if (result?.approval) {
         const index = approvals.value.findIndex(a => a.id === id)
