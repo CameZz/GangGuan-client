@@ -3,10 +3,12 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import type { User } from '@/types'
-import { unwrapApiData } from '@/api'
+import { unwrapApiData, setToken, removeToken, getToken, setSavedUser, removeSavedUser } from '@/api'
 import { authApi } from '@/api/auth'
 import { userApi } from '@/api/users'
 import { wsService } from '@/utils/websocket'
+
+const LOGOUT_FLAG_KEY = 'gangguan:logged-out'
 
 type UserCreateInput = Omit<User, 'id'> & { password: string }
 type UserUpdateInput = Partial<Omit<User, 'id'>> & { password?: string }
@@ -36,7 +38,15 @@ export const useUserStore = defineStore('user', () => {
     initPromise = (async () => {
       isLoading.value = true
       try {
-        const data = unwrapApiData<{ user: User }>(await authApi.me() )
+        // 如果刚退出登录，不自动恢复登录状态
+        if (sessionStorage.getItem(LOGOUT_FLAG_KEY)) {
+          currentUser.value = null
+          return
+        }
+
+        // 仅通过 cookie 验证登录状态，不自动使用 token
+        // token 登录需要用户手动点击"一键登录"
+        const data = unwrapApiData<{ user: User }>(await authApi.me())
         currentUser.value = data?.user ? normalizeUser(data.user) : null
       } catch {
         currentUser.value = null
@@ -51,12 +61,25 @@ export const useUserStore = defineStore('user', () => {
     return initPromise
   }
 
-  async function login(employeeId: string, password: string): Promise<boolean> {
+  async function login(employeeId: string, password: string, remember: boolean = false): Promise<boolean> {
     try {
-      const data = unwrapApiData<{ user: User }>(await authApi.login(employeeId, password) )
+      const response = await authApi.login(employeeId, password)
+      const data = unwrapApiData<{ user: User; token: string }>(response)
+
       if (data?.user) {
         currentUser.value = normalizeUser(data.user)
         hasInitialized.value = true
+        sessionStorage.removeItem(LOGOUT_FLAG_KEY)
+
+        // 只有勾选记住我时才记住登录凭据；普通登录会清掉旧设备凭据，避免串号。
+        if (remember && data.token) {
+          setToken(data.token)
+          setSavedUser({ employeeId: data.user.employeeId, name: data.user.name })
+        } else {
+          removeToken()
+          removeSavedUser()
+        }
+
         return true
       }
       return false
@@ -72,9 +95,39 @@ export const useUserStore = defineStore('user', () => {
     } catch {
       // 忽略登出错误
     }
+    removeToken()
+    removeSavedUser()
+    sessionStorage.setItem(LOGOUT_FLAG_KEY, '1')
     wsService.disconnect()
     currentUser.value = null
     hasInitialized.value = true
+  }
+
+  // 用户点击一键登录时，才使用本地保存的 remember token 换取 session。
+  async function autoLogin(): Promise<boolean> {
+    const token = getToken()
+    if (!token) {
+      removeSavedUser()
+      return false
+    }
+
+    try {
+      const data = unwrapApiData<{ user: User }>(await authApi.validateToken(token))
+      if (data?.user) {
+        currentUser.value = normalizeUser(data.user)
+        hasInitialized.value = true
+        sessionStorage.removeItem(LOGOUT_FLAG_KEY)
+        return true
+      }
+      removeToken()
+      removeSavedUser()
+      return false
+    } catch {
+      // token 无效，清除
+      removeToken()
+      removeSavedUser()
+      return false
+    }
   }
 
   async function updateUser(id: string, data: UserUpdateInput): Promise<User | null> {
@@ -104,6 +157,8 @@ export const useUserStore = defineStore('user', () => {
   async function changePassword(oldPassword: string, newPassword: string): Promise<boolean> {
     try {
       await authApi.changePassword(oldPassword, newPassword)
+      removeToken()
+      removeSavedUser()
       return true
     } catch (error) {
       console.error('修改密码失败:', error)
@@ -168,6 +223,7 @@ export const useUserStore = defineStore('user', () => {
     init,
     login,
     logout,
+    autoLogin,
     updateUser,
     updateProfile,
     changePassword,

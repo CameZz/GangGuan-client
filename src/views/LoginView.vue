@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { onMounted, ref, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { useUserStore } from '@/stores'
+import { getToken, getSavedUser, type SavedUser } from '@/api'
 
 const router = useRouter()
 const userStore = useUserStore()
@@ -10,24 +11,56 @@ const SAVED_EMPLOYEE_ID_KEY = 'gangguan:saved-employee-id'
 
 const employeeId = ref('')
 const password = ref('')
-const saveEmployeeId = ref(false)
+const rememberLogin = ref(false)
 const error = ref('')
+const isLoggingIn = ref(false)
+
+const savedUser = ref<SavedUser | null>(null)
+const savedToken = ref<string | null>(null)
+
+const hasSavedToken = computed(() => !!savedToken.value && !!savedUser.value)
 
 onMounted(() => {
   const savedEmployeeId = localStorage.getItem(SAVED_EMPLOYEE_ID_KEY)
-  if (!savedEmployeeId) return
 
-  employeeId.value = savedEmployeeId
-  saveEmployeeId.value = true
-})
-
-function persistEmployeeId() {
-  if (!saveEmployeeId.value) {
-    localStorage.removeItem(SAVED_EMPLOYEE_ID_KEY)
-    return
+  if (savedEmployeeId) {
+    employeeId.value = savedEmployeeId
   }
 
-  localStorage.setItem(SAVED_EMPLOYEE_ID_KEY, employeeId.value)
+  savedUser.value = getSavedUser()
+  savedToken.value = getToken()
+})
+
+function persistEmployeeId(remember: boolean) {
+  if (remember) {
+    localStorage.setItem(SAVED_EMPLOYEE_ID_KEY, employeeId.value)
+  } else {
+    localStorage.removeItem(SAVED_EMPLOYEE_ID_KEY)
+  }
+}
+
+async function afterLogin() {
+  const { storesManager } = await import('@/stores')
+  await storesManager.initDataAndWebSocket()
+  router.push('/projects')
+}
+
+async function handleOneClickLogin() {
+  error.value = ''
+  isLoggingIn.value = true
+
+  try {
+    const success = await userStore.autoLogin()
+    if (success) {
+      await afterLogin()
+    } else {
+      savedUser.value = null
+      savedToken.value = null
+      error.value = '登录已过期，请重新登录'
+    }
+  } finally {
+    isLoggingIn.value = false
+  }
 }
 
 async function handleLogin() {
@@ -38,15 +71,17 @@ async function handleLogin() {
     return
   }
 
-  const success = await userStore.login(employeeId.value, password.value)
-  if (success) {
-    persistEmployeeId()
-    // 初始化 WebSocket 和数据
-    const { storesManager } = await import('@/stores')
-    await storesManager.initDataAndWebSocket()
-    router.push('/projects')
-  } else {
-    error.value = '工号或密码错误'
+  isLoggingIn.value = true
+  try {
+    const success = await userStore.login(employeeId.value, password.value, rememberLogin.value)
+    if (success) {
+      persistEmployeeId(rememberLogin.value)
+      await afterLogin()
+    } else {
+      error.value = '工号或密码错误'
+    }
+  } finally {
+    isLoggingIn.value = false
   }
 }
 </script>
@@ -84,24 +119,33 @@ async function handleLogin() {
 
         <label class="save-login-option">
           <input
-            v-model="saveEmployeeId"
+            v-model="rememberLogin"
             type="checkbox"
             class="save-login-checkbox"
           />
-          <span>保存工号</span>
+          <span>记住登录</span>
         </label>
 
         <div v-if="error" class="error-message">
           {{ error }}
         </div>
 
-        <button type="submit" class="btn btn-primary btn-block">
-          登录
+        <button type="submit" class="btn btn-primary btn-block" :disabled="isLoggingIn">
+          {{ isLoggingIn ? '登录中...' : '登录' }}
+        </button>
+
+        <button
+          v-if="hasSavedToken"
+          type="button"
+          class="btn btn-secondary btn-block"
+          :disabled="isLoggingIn"
+          @click="handleOneClickLogin"
+        >
+          一键登录&nbsp;&nbsp;({{ savedUser?.name }})
         </button>
       </form>
 
       <div class="login-footer">
-        <p class="demo-hint">演示账号: admin / admin123</p>
       </div>
     </div>
   </div>

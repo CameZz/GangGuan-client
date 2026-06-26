@@ -19,6 +19,43 @@ export function unwrapApiData<T>(response: ApiEnvelope<T> | T | null | undefined
   return response as T
 }
 
+const TOKEN_KEY = 'gangguan:auth-token'
+const SAVED_USER_KEY = 'gangguan:saved-user'
+
+export function getToken(): string | null {
+  return localStorage.getItem(TOKEN_KEY)
+}
+
+export function setToken(token: string): void {
+  localStorage.setItem(TOKEN_KEY, token)
+}
+
+export function removeToken(): void {
+  localStorage.removeItem(TOKEN_KEY)
+}
+
+export interface SavedUser {
+  employeeId: string
+  name: string
+}
+
+export function getSavedUser(): SavedUser | null {
+  try {
+    const raw = localStorage.getItem(SAVED_USER_KEY)
+    return raw ? JSON.parse(raw) : null
+  } catch {
+    return null
+  }
+}
+
+export function setSavedUser(user: SavedUser): void {
+  localStorage.setItem(SAVED_USER_KEY, JSON.stringify(user))
+}
+
+export function removeSavedUser(): void {
+  localStorage.removeItem(SAVED_USER_KEY)
+}
+
 const api = axios.create({
   baseURL: getApiBaseUrl(),
   withCredentials: true,
