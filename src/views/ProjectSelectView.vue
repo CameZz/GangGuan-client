@@ -1,10 +1,7 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { useUserStore, useProjectStore, storesManager } from '@/stores'
-import ProjectModal from '@/components/project/ProjectModal.vue'
-import type { Project } from '@/types'
-import { createDefaultPhaseTemplates } from '@/utils/taskPhases'
 
 const router = useRouter()
 const userStore = useUserStore()
@@ -12,10 +9,7 @@ const projectStore = useProjectStore()
 
 const currentUser = computed(() => userStore.currentUser)
 const projects = computed(() => projectStore.projects)
-const canCreateProject = computed(() => userStore.isProjectManager)
-const isProjectModalOpen = ref(false)
-const isCreatingProject = ref(false)
-const createProjectError = ref('')
+const isAdmin = computed(() => userStore.isAdmin)
 
 function selectProject(projectId: string) {
   projectStore.setCurrentProject(projectId)
@@ -27,53 +21,8 @@ async function handleLogout() {
   router.push('/login')
 }
 
-function openProjectModal() {
-  createProjectError.value = ''
-  isProjectModalOpen.value = true
-}
-
-function closeProjectModal() {
-  if (isCreatingProject.value) return
-  isProjectModalOpen.value = false
-  createProjectError.value = ''
-}
-
-async function handleProjectCreate(projectData: Partial<Project>) {
-  if (isCreatingProject.value) return
-
-  const name = projectData.name?.trim()
-  if (!name) {
-    createProjectError.value = '请输入项目名称'
-    return
-  }
-
-  if (!projectData.defaultReviewerId) {
-    createProjectError.value = '请选择默认审批人'
-    return
-  }
-
-  createProjectError.value = ''
-  isCreatingProject.value = true
-
-  const project = await projectStore.createProject({
-    name,
-    description: projectData.description?.trim() || '',
-    defaultReviewerId: projectData.defaultReviewerId,
-    phaseTemplates: createDefaultPhaseTemplates(),
-    nonWorkdays: [],
-    extraWorkdays: []
-  })
-
-  isCreatingProject.value = false
-
-  if (!project) {
-    createProjectError.value = '创建项目失败，请稍后重试'
-    return
-  }
-
-  projectStore.setCurrentProject(project.id)
-  closeProjectModal()
-  router.push(`/kanban/${project.id}`)
+function goToAdmin() {
+  router.push('/admin')
 }
 </script>
 
@@ -90,11 +39,12 @@ async function handleProjectCreate(projectData: Partial<Project>) {
     <main class="page-content">
       <div class="section-header">
         <h2 class="section-title">选择要操作的项目</h2>
-        <button v-if="canCreateProject" class="btn btn-primary" @click="openProjectModal">
+        <button v-if="isAdmin" class="btn btn-secondary" @click="goToAdmin">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M12 5v14M5 12h14" />
+            <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" />
+            <circle cx="12" cy="12" r="3" />
           </svg>
-          新建项目
+          项目管理
         </button>
       </div>
       <div class="projects-grid">
@@ -120,19 +70,13 @@ async function handleProjectCreate(projectData: Partial<Project>) {
         <p>暂无可用项目</p>
       </div>
     </main>
-
-    <ProjectModal
-      :is-open="isProjectModalOpen"
-      :saving="isCreatingProject"
-      :error="createProjectError"
-      @close="closeProjectModal"
-      @save="handleProjectCreate"
-    />
   </div>
 </template>
 
 <style scoped>
 .project-select-page {
+  max-width: 100%;
+  width: 100%;
   min-height: 100vh;
   background-color: var(--color-bg-secondary);
 }

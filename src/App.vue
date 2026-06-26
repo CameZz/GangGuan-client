@@ -3,8 +3,10 @@ import { computed } from 'vue'
 import { RouterView, useRoute } from 'vue-router'
 import AppHeader from '@/components/layout/AppHeader.vue'
 import AppSidebar from '@/components/layout/AppSidebar.vue'
+import { useUserStore } from '@/stores'
 
 const route = useRoute()
+const userStore = useUserStore()
 const hideSidebarRoutes = ['/projects', '/login', '/admin', '/messages']
 const hideSidebarRouteNames = ['ProjectDetail']
 const hideSidebarPrefixes = ['/member-schedule']
@@ -13,7 +15,7 @@ const showSidebar = computed(() => {
     && !hideSidebarRouteNames.includes(String(route.name))
     && !hideSidebarPrefixes.some(prefix => route.path.startsWith(prefix))
 })
-const showHeader = computed(() => route.path !== '/projects' && route.path !== '/login')
+const showHeader = computed(() => route.path !== '/login' && route.path !== '/projects' && route.path !== '/admin' && userStore.isLoggedIn)
 </script>
 
 <template>

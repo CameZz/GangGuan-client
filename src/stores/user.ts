@@ -95,8 +95,6 @@ export const useUserStore = defineStore('user', () => {
     } catch {
       // 忽略登出错误
     }
-    removeToken()
-    removeSavedUser()
     sessionStorage.setItem(LOGOUT_FLAG_KEY, '1')
     wsService.disconnect()
     currentUser.value = null

@@ -27,7 +27,12 @@ const planningStore = usePlanningStore()
 const userStore = useUserStore()
 
 const tasks = computed(() => taskStore.tasks)
-const members = computed(() => memberStore.members)
+const members = computed(() => {
+  if (currentProjectId.value) {
+    return projectStore.getProjectMemberUsers(currentProjectId.value)
+  }
+  return memberStore.members
+})
 const plannings = computed(() => planningStore.plannings)
 const projects = computed(() => projectStore.projects)
 

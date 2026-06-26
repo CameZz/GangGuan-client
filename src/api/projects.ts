@@ -18,6 +18,15 @@ export const projectApi = {
   delete: (id: string) =>
     api.delete(`/projects/${id}`),
 
+  getMembers: (id: string) =>
+    api.get(`/projects/${id}/members`),
+
+  updateMembers: (id: string, userIds: string[]) =>
+    api.put(`/projects/${id}/members`, { userIds }),
+
+  getReviewerCandidates: (id: string) =>
+    api.get(`/projects/${id}/reviewer-candidates`),
+
   addPhaseTemplate: (projectId: string, data: { name: string }) =>
     api.post(`/projects/${projectId}/phase-templates`, data),
 

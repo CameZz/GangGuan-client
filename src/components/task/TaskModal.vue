@@ -48,7 +48,13 @@ const projectStore = useProjectStore()
 const taskStore = useTaskStore()
 const userStore = useUserStore()
 
-const members = computed(() => memberStore.members)
+const members = computed(() => {
+  const projectId = form.value.projectId || props.projectId
+  if (projectId) {
+    return projectStore.getProjectMemberUsers(projectId)
+  }
+  return memberStore.members
+})
 const plannings = computed(() => planningStore.plannings)
 
 const PREVIEW_DAYS = 15

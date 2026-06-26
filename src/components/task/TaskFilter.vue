@@ -2,10 +2,11 @@
 import { ref, computed, watch } from 'vue'
 import type { TaskStatus, TaskStage, TaskPriority } from '@/types'
 import { TASK_STAGES } from '@/types'
-import { useMemberStore } from '@/stores'
+import { useMemberStore, useProjectStore } from '@/stores'
 
 const props = withDefaults(defineProps<{
   showStatusFilter?: boolean
+  projectId?: string
 }>(), {
   showStatusFilter: true
 })
@@ -23,7 +24,13 @@ interface TaskFilters {
 }
 
 const memberStore = useMemberStore()
-const members = computed(() => memberStore.members)
+const projectStore = useProjectStore()
+const members = computed(() => {
+  if (props.projectId) {
+    return projectStore.getProjectMemberUsers(props.projectId)
+  }
+  return memberStore.members
+})
 
 const selectedStatus = ref<TaskStatus | ''>('')
 const selectedStage = ref<TaskStage | ''>('')

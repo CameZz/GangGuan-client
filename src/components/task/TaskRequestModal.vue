@@ -29,17 +29,29 @@ const planningStore = usePlanningStore()
 const taskStore = useTaskStore()
 const userStore = useUserStore()
 
-const members = computed(() => memberStore.members)
+const members = computed(() => {
+  const projectId = currentProjectId.value
+  if (projectId) {
+    return projectStore.getProjectMemberUsers(projectId)
+  }
+  return memberStore.members
+})
 
 // PM/Admin 用户列表（用于审批人选择）
 const pmAndAdminUsers = ref<User[]>([])
 const selectedReviewerId = ref<string>('')
 
-// 加载 PM/Admin 用户列表
+// 加载审批人候选人列表（项目成员中的 PM + 管理员）
 async function loadPmAndAdminUsers() {
   try {
-    const allUsers = await userStore.getAllUsers()
-    pmAndAdminUsers.value = allUsers.filter(u => u.isAdmin || u.role === 'pm')
+    const projectId = currentProjectId.value
+    if (projectId) {
+      const reviewers = await projectStore.fetchReviewerCandidates(projectId)
+      pmAndAdminUsers.value = reviewers
+    } else {
+      const allUsers = await userStore.getAllUsers()
+      pmAndAdminUsers.value = allUsers.filter(u => u.isAdmin || u.role === 'pm')
+    }
   } catch (error) {
     console.error('加载审批人列表失败:', error)
   }

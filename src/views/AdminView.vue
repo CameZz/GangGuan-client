@@ -1,12 +1,31 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
-import { useUserStore, useMemberStore } from '@/stores'
+import { ref, computed, onMounted, watch } from 'vue'
+import { useRouter } from 'vue-router'
+import { useUserStore, useMemberStore, useProjectStore, storesManager } from '@/stores'
 import { ROLES } from '@/types'
-import type { User, RoleType } from '@/types'
+import type { User, RoleType, Project } from '@/types'
+import MemberManagementModal from '@/components/admin/MemberManagementModal.vue'
+import ProjectModal from '@/components/project/ProjectModal.vue'
+import { createDefaultPhaseTemplates } from '@/utils/taskPhases'
 
+const router = useRouter()
 const userStore = useUserStore()
 const memberStore = useMemberStore()
+const projectStore = useProjectStore()
 
+async function handleLogout() {
+  await storesManager.logout()
+  router.push('/login')
+}
+
+function goToProjects() {
+  router.push('/projects')
+}
+
+// Tab state
+const activeTab = ref<'users' | 'projects'>('users')
+
+// User management state
 const users = ref<User[]>([])
 const isLoading = ref(true)
 const isSaving = ref(false)
@@ -19,8 +38,137 @@ async function loadUsers() {
   isLoading.value = false
 }
 
-onMounted(loadUsers)
+onMounted(() => {
+  loadUsers()
+  loadProjects()
+})
 
+// Project management state
+const projects = ref<Project[]>([])
+const isLoadingProjects = ref(false)
+
+async function loadProjects() {
+  isLoadingProjects.value = true
+  await projectStore.init()
+  projects.value = projectStore.projects
+  isLoadingProjects.value = false
+}
+
+// Member management modal state
+const isMemberModalOpen = ref(false)
+const selectedProject = ref<Project | null>(null)
+
+function openMemberModal(project: Project) {
+  selectedProject.value = project
+  isMemberModalOpen.value = true
+}
+
+function closeMemberModal() {
+  isMemberModalOpen.value = false
+  selectedProject.value = null
+}
+
+async function handleMemberSave(userIds: string[]) {
+  if (!selectedProject.value) return
+  const result = await projectStore.updateProjectMembers(selectedProject.value.id, userIds)
+  if (result) {
+    await loadProjects()
+    closeMemberModal()
+  }
+}
+
+// Project creation/edit state
+const isProjectModalOpen = ref(false)
+const isCreatingProject = ref(false)
+const createProjectError = ref('')
+const editingProject = ref<Project | null>(null)
+
+function openProjectModal() {
+  createProjectError.value = ''
+  editingProject.value = null
+  isProjectModalOpen.value = true
+}
+
+function openEditProjectModal(project: Project) {
+  createProjectError.value = ''
+  editingProject.value = project
+  isProjectModalOpen.value = true
+}
+
+function closeProjectModal() {
+  if (isCreatingProject.value) return
+  isProjectModalOpen.value = false
+  createProjectError.value = ''
+  editingProject.value = null
+}
+
+async function handleProjectSave(projectData: Partial<Project>) {
+  if (isCreatingProject.value) return
+
+  const name = projectData.name?.trim()
+  if (!name) {
+    createProjectError.value = '请输入项目名称'
+    return
+  }
+
+  if (!projectData.defaultReviewerId) {
+    createProjectError.value = '请选择默认审批人'
+    return
+  }
+
+  createProjectError.value = ''
+  isCreatingProject.value = true
+
+  if (editingProject.value) {
+    // Edit mode
+    const project = await projectStore.updateProject(editingProject.value.id, {
+      name,
+      description: projectData.description?.trim() || '',
+      defaultReviewerId: projectData.defaultReviewerId
+    })
+
+    isCreatingProject.value = false
+
+    if (!project) {
+      createProjectError.value = '保存失败，请稍后重试'
+      return
+    }
+  } else {
+    // Create mode
+    const project = await projectStore.createProject({
+      name,
+      description: projectData.description?.trim() || '',
+      defaultReviewerId: projectData.defaultReviewerId,
+      phaseTemplates: createDefaultPhaseTemplates(),
+      nonWorkdays: [],
+      extraWorkdays: []
+    })
+
+    isCreatingProject.value = false
+
+    if (!project) {
+      createProjectError.value = '创建项目失败，请稍后重试'
+      return
+    }
+  }
+
+  await loadProjects()
+  closeProjectModal()
+}
+
+async function handleProjectDelete(projectId: string) {
+  if (confirm('确定要删除该项目吗？')) {
+    const success = await projectStore.deleteProject(projectId)
+    if (success) {
+      await loadProjects()
+      closeProjectModal()
+    } else {
+      createProjectError.value = '删除项目失败'
+    }
+  }
+}
+
+// User management functions
 const selectedRole = ref<string>('')
 
 const filteredUsers = computed(() => {
@@ -133,65 +281,151 @@ function getRoleName(roleType: RoleType): string {
 </script>
 
 <template>
-  <div class="page admin-page">
-    <div class="page-header">
-      <div class="header-content">
+  <div class="project-select-page">
+    <header class="page-header">
+      <div class="header-left">
+        <h1 class="logo">钢 管 系 统</h1>
+        <span class="user-greeting">项目管理</span>
       </div>
       <div class="header-actions">
-        <select v-model="selectedRole" class="input select role-filter">
-          <option value="">全部角色</option>
-          <option v-for="role in ROLES" :key="role.type" :value="role.type">
-            {{ role.name }}
-          </option>
-        </select>
-        <button class="btn btn-primary btn-same-size" @click="openNewUserModal">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M12 5v14M5 12h14" />
-          </svg>
-          新建用户
+        <button class="btn btn-ghost" @click="goToProjects">返回项目列表</button>
+        <button class="btn btn-ghost" @click="handleLogout">退出登录</button>
+      </div>
+    </header>
+
+    <div class="admin-content">
+      <!-- Tab Navigation -->
+      <div class="tabs">
+        <button
+          class="tab"
+          :class="{ active: activeTab === 'users' }"
+          @click="activeTab = 'users'"
+        >
+          用户管理
         </button>
+        <button
+          class="tab"
+          :class="{ active: activeTab === 'projects' }"
+          @click="activeTab = 'projects'"
+        >
+          项目管理
+        </button>
+      </div>
+
+      <!-- User Management Tab -->
+    <div v-show="activeTab === 'users'">
+      <div class="page-header">
+        <div class="header-content">
+        </div>
+        <div class="header-actions">
+          <select v-model="selectedRole" class="input select role-filter">
+            <option value="">全部角色</option>
+            <option v-for="role in ROLES" :key="role.type" :value="role.type">
+              {{ role.name }}
+            </option>
+          </select>
+          <button class="btn btn-primary btn-same-size" @click="openNewUserModal">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M12 5v14M5 12h14" />
+            </svg>
+            新建用户
+          </button>
+        </div>
+      </div>
+
+      <div class="users-section">
+        <div class="users-table">
+          <table>
+            <thead>
+              <tr>
+                <th>工号</th>
+                <th>姓名</th>
+                <th>角色</th>
+                <th>手机号</th>
+                <th>邮箱</th>
+                <th>权限</th>
+                <th>操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="user in filteredUsers" :key="user.id">
+                <td>{{ user.employeeId }}</td>
+                <td>
+                  <div class="user-cell">
+                    <img :src="user.avatar" :alt="user.name" class="user-avatar" />
+                    <span>{{ user.name }}</span>
+                  </div>
+                </td>
+                <td>{{ getRoleName(user.role) }}</td>
+                <td>{{ user.phone }}</td>
+                <td>{{ user.email }}</td>
+                <td>
+                  <span v-if="user.isAdmin" class="badge badge-admin">管理员</span>
+                  <span v-else class="badge badge-user">普通用户</span>
+                </td>
+                <td>
+                  <button class="btn btn-ghost btn-sm" @click="openEditUserModal(user)">
+                    编辑
+                  </button>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
       </div>
     </div>
 
-    <div class="users-section">
-      <div class="users-table">
-        <table>
-          <thead>
-            <tr>
-              <th>工号</th>
-              <th>姓名</th>
-              <th>角色</th>
-              <th>手机号</th>
-              <th>邮箱</th>
-              <th>权限</th>
-              <th>操作</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="user in filteredUsers" :key="user.id">
-              <td>{{ user.employeeId }}</td>
-              <td>
-                <div class="user-cell">
-                  <img :src="user.avatar" :alt="user.name" class="user-avatar" />
-                  <span>{{ user.name }}</span>
-                </div>
-              </td>
-              <td>{{ getRoleName(user.role) }}</td>
-              <td>{{ user.phone }}</td>
-              <td>{{ user.email }}</td>
-              <td>
-                <span v-if="user.isAdmin" class="badge badge-admin">管理员</span>
-                <span v-else class="badge badge-user">普通用户</span>
-              </td>
-              <td>
-                <button class="btn btn-ghost btn-sm" @click="openEditUserModal(user)">
-                  编辑
-                </button>
-              </td>
-            </tr>
-          </tbody>
-        </table>
+    <!-- Project Management Tab -->
+    <div v-show="activeTab === 'projects'">
+      <div class="page-header">
+        <div class="header-content">
+        </div>
+        <div class="header-actions">
+          <button class="btn btn-primary btn-same-size" @click="openProjectModal">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M12 5v14M5 12h14" />
+            </svg>
+            新建项目
+          </button>
+        </div>
       </div>
+
+      <div class="projects-section">
+        <div v-if="isLoadingProjects" class="loading-state">
+          加载中...
+        </div>
+        <div v-else-if="projects.length === 0" class="empty-state">
+          暂无项目
+        </div>
+        <div v-else class="projects-table">
+          <table>
+            <thead>
+              <tr>
+                <th>项目名称</th>
+                <th>成员数</th>
+                <th>操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="project in projects" :key="project.id">
+                <td>{{ project.name }}</td>
+                <td>{{ project.members?.length || 0 }}人</td>
+                <td>
+                  <div class="action-buttons">
+                    <button class="btn btn-ghost btn-sm" @click="openEditProjectModal(project)">
+                      编辑
+                    </button>
+                    <button class="btn btn-ghost btn-sm" @click="openMemberModal(project)">
+                      管理成员
+                    </button>
+                  </div>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
     </div>
 
     <!-- User Modal -->
@@ -300,6 +534,26 @@ function getRoleName(roleType: RoleType): string {
         </div>
       </div>
     </div>
+
+    <!-- Member Management Modal -->
+    <MemberManagementModal
+      v-if="selectedProject"
+      :is-open="isMemberModalOpen"
+      :project="selectedProject"
+      @close="closeMemberModal"
+      @save="handleMemberSave"
+    />
+
+    <!-- Project Creation/Edit Modal -->
+    <ProjectModal
+      :is-open="isProjectModalOpen"
+      :project="editingProject"
+      :saving="isCreatingProject"
+      :error="createProjectError"
+      @close="closeProjectModal"
+      @save="handleProjectSave"
+      @delete="handleProjectDelete"
+    />
   </div>
 </template>
 
@@ -307,13 +561,83 @@ function getRoleName(roleType: RoleType): string {
 .admin-page {
   max-width: 100%;
   width: 100%;
+  min-height: 100vh;
+  background-color: var(--color-bg-secondary);
 }
 
+.admin-content {
+  padding: 2px 5%;
+}
+
+/* Header */
+.page-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 32px;
+  background-color: var(--color-bg-primary);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.header-left {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+}
+
+.logo {
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--color-primary);
+}
+
+.user-greeting {
+  font-size: 14px;
+  color: var(--color-text-secondary);
+}
+
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Tabs */
+.tabs {
+  display: flex;
+  gap: 4px;
+  padding: 0 0 6px;
+  border-bottom: 1px solid var(--color-border);
+  margin-bottom: 8px;
+}
+
+.tab {
+  padding: 10px 20px;
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.tab:hover {
+  color: var(--color-text-primary);
+}
+
+.tab.active {
+  color: var(--color-primary);
+  border-bottom-color: var(--color-primary);
+}
+
+/* Page Header */
 .page-header {
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
-  margin-bottom: 32px;
+  margin-bottom: 16px;
 }
 
 .page-subtitle {
@@ -333,7 +657,7 @@ function getRoleName(roleType: RoleType): string {
 }
 
 .role-filter {
-  min-width: 120px;
+  min-width: 160px;
   height: 38px;
 }
 
@@ -345,6 +669,7 @@ function getRoleName(roleType: RoleType): string {
   white-space: nowrap;
 }
 
+/* Users Section */
 .section-title {
   font-size: 18px;
   font-weight: 600;
@@ -356,7 +681,7 @@ function getRoleName(roleType: RoleType): string {
   border: 1px solid var(--color-border);
   border-radius: var(--radius-lg);
   overflow: hidden;
-  max-height: calc(100vh - 190px);
+  max-height: calc(100vh - 250px);
   overflow-y: auto;
 }
 
@@ -373,6 +698,42 @@ function getRoleName(roleType: RoleType): string {
   border-radius: 3px;
 }
 
+/* Projects Section */
+.projects-section {
+  min-height: 200px;
+}
+
+.projects-table {
+  background-color: var(--color-bg-primary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  max-height: calc(100vh - 250px);
+  overflow-y: auto;
+}
+
+.projects-table::-webkit-scrollbar {
+  width: 6px;
+}
+
+.projects-table::-webkit-scrollbar-track {
+  background: var(--color-bg-tertiary);
+}
+
+.projects-table::-webkit-scrollbar-thumb {
+  background: var(--color-border);
+  border-radius: 3px;
+}
+
+.loading-state,
+.empty-state {
+  text-align: center;
+  padding: 48px;
+  color: var(--color-text-muted);
+  font-size: 14px;
+}
+
+/* Table styles */
 table {
   width: 100%;
   border-collapse: collapse;
@@ -434,6 +795,13 @@ tr:hover td {
   color: #6b7280;
 }
 
+/* Action buttons */
+.action-buttons {
+  display: flex;
+  gap: 8px;
+}
+
+/* Modal styles */
 .modal-overlay {
   position: fixed;
   top: 0;

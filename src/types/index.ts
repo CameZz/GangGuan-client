@@ -54,10 +54,19 @@ export interface Project {
   createdAt: string
   defaultReviewerId: string | null
   phaseTemplates: ProjectPhaseTemplate[]
+  members?: ProjectMember[]
   nonWorkdays: string[]    // 应上班但休息的日期（如节假日）
   extraWorkdays: string[]  // 应休息但上班的日期（如加班）
 }
 
+
+export interface ProjectMember {
+  id: string
+  projectId: string
+  userId: string
+  createdAt: string
+  user: User
+}
 export interface Member {
   id: string
   name: string

@@ -2,7 +2,7 @@
 
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import type { Project, ProjectPhaseTemplate } from '@/types'
+import type { Project, ProjectMember, ProjectPhaseTemplate, User } from '@/types'
 import { projectApi } from '@/api/projects'
 import { unwrapApiData } from '@/api'
 import { wsService } from '@/utils/websocket'
@@ -20,14 +20,19 @@ export const useProjectStore = defineStore('project', () => {
 
   const projectCount = computed(() => projects.value.length)
 
+  function normalizeProject(project: Project): Project {
+    return {
+      ...project,
+      members: project.members || []
+    }
+  }
+
   function dedupeProjects(data: Project[]): Project[] {
     const order: string[] = []
     const byId = new Map<string, Project>()
 
-    data.forEach(project => {
-      if (!byId.has(project.id)) {
-        order.push(project.id)
-      }
+    data.map(normalizeProject).forEach(project => {
+      if (!byId.has(project.id)) order.push(project.id)
       byId.set(project.id, project)
     })
 
@@ -35,36 +40,49 @@ export const useProjectStore = defineStore('project', () => {
   }
 
   function upsertProject(project: Project) {
+    const normalized = normalizeProject(project)
     let replaced = false
     const next: Project[] = []
 
     projects.value.forEach(item => {
-      if (item.id !== project.id) {
+      if (item.id !== normalized.id) {
         next.push(item)
         return
       }
 
       if (!replaced) {
-        next.push(project)
+        next.push(normalized)
         replaced = true
       }
     })
 
-    if (!replaced) {
-      next.push(project)
-    }
-
+    if (!replaced) next.push(normalized)
     projects.value = next
   }
 
-  // Initialize projects from API
+  function membersToProjectMembers(projectId: string, members: User[]): ProjectMember[] {
+    return members.map(user => ({
+      id: `${projectId}:${user.id}`,
+      projectId,
+      userId: user.id,
+      createdAt: '',
+      user
+    }))
+  }
+
+  function setProjectMembers(projectId: string, members: User[]) {
+    const project = projects.value.find(item => item.id === projectId)
+    if (!project) return
+    upsertProject({ ...project, members: membersToProjectMembers(projectId, members) })
+  }
+
   async function init() {
     isLoading.value = true
     try {
-      const data = unwrapApiData<{ projects: Project[] }>(await projectApi.getAll() )
+      const data = unwrapApiData<{ projects: Project[] }>(await projectApi.getAll())
       projects.value = dedupeProjects(data?.projects || [])
     } catch (error) {
-      console.error('获取项目列表失败:', error)
+      console.error('Failed to list projects:', error)
     } finally {
       isLoading.value = false
     }
@@ -81,7 +99,6 @@ export const useProjectStore = defineStore('project', () => {
   }
 
   function setCurrentProject(id: string | null) {
-    // Only reset planning if project actually changed
     if (currentProjectId.value !== id) {
       currentProjectId.value = id
       selectedPlanningId.value = null
@@ -96,9 +113,64 @@ export const useProjectStore = defineStore('project', () => {
     selectedPlanningId.value = null
   }
 
+  function getProjectMemberUsers(projectId: string | null | undefined): User[] {
+    if (!projectId) return []
+    const project = projects.value.find(p => p.id === projectId)
+    return (project?.members || []).map(member => member.user).filter(Boolean)
+  }
+
+  function isProjectMember(projectId: string | null | undefined, userId: string | null | undefined): boolean {
+    if (!projectId || !userId) return false
+    return getProjectMemberUsers(projectId).some(member => member.id === userId)
+  }
+
+  function canOperateProject(projectId: string | null | undefined, user: User | null | undefined): boolean {
+    if (!projectId || !user) return false
+    return user.isAdmin || isProjectMember(projectId, user.id)
+  }
+
+  function canManageProject(projectId: string | null | undefined, user: User | null | undefined): boolean {
+    if (!projectId || !user) return false
+    return user.isAdmin || (user.role === 'pm' && isProjectMember(projectId, user.id))
+  }
+
+  async function fetchProjectMembers(projectId: string): Promise<User[]> {
+    try {
+      const data = unwrapApiData<{ members: User[] }>(await projectApi.getMembers(projectId))
+      const members = data?.members || []
+      setProjectMembers(projectId, members)
+      return members
+    } catch (error) {
+      console.error('Failed to fetch project members:', error)
+      return getProjectMemberUsers(projectId)
+    }
+  }
+
+  async function updateProjectMembers(projectId: string, userIds: string[]): Promise<User[] | null> {
+    try {
+      const data = unwrapApiData<{ members: User[] }>(await projectApi.updateMembers(projectId, userIds))
+      const members = data?.members || []
+      setProjectMembers(projectId, members)
+      return members
+    } catch (error) {
+      console.error('Failed to update project members:', error)
+      return null
+    }
+  }
+
+  async function fetchReviewerCandidates(projectId: string): Promise<User[]> {
+    try {
+      const data = unwrapApiData<{ reviewers: User[] }>(await projectApi.getReviewerCandidates(projectId))
+      return data?.reviewers || []
+    } catch (error) {
+      console.error('Failed to fetch reviewer candidates:', error)
+      return getProjectMemberUsers(projectId).filter(user => user.isAdmin || user.role === 'pm')
+    }
+  }
+
   async function createProject(data: Omit<Project, 'id' | 'createdAt'>): Promise<Project | null> {
     try {
-      const result = unwrapApiData<{ project: Project }>(await projectApi.create(data) )
+      const result = unwrapApiData<{ project: Project }>(await projectApi.create(data))
       if (result?.project) {
         const project = result.project
         upsertProject(project)
@@ -106,14 +178,14 @@ export const useProjectStore = defineStore('project', () => {
       }
       return null
     } catch (error) {
-      console.error('创建项目失败:', error)
+      console.error('Failed to create project:', error)
       return null
     }
   }
 
   async function updateProject(id: string, data: Partial<Project>): Promise<Project | null> {
     try {
-      const result = unwrapApiData<{ project: Project }>(await projectApi.update(id, data) )
+      const result = unwrapApiData<{ project: Project }>(await projectApi.update(id, data))
       if (result?.project) {
         const project = result.project
         upsertProject(project)
@@ -121,7 +193,7 @@ export const useProjectStore = defineStore('project', () => {
       }
       return null
     } catch (error) {
-      console.error('更新项目失败:', error)
+      console.error('Failed to update project:', error)
       return null
     }
   }
@@ -137,7 +209,7 @@ export const useProjectStore = defineStore('project', () => {
 
     try {
       const data = unwrapApiData<{ template: ProjectPhaseTemplate }>(
-        await projectApi.addPhaseTemplate(projectId, { name: trimmedName }) 
+        await projectApi.addPhaseTemplate(projectId, { name: trimmedName })
       )
 
       if (data?.template) {
@@ -146,7 +218,7 @@ export const useProjectStore = defineStore('project', () => {
       }
       return null
     } catch (error) {
-      console.error('添加阶段模板失败:', error)
+      console.error('Failed to add phase template:', error)
       return null
     }
   }
@@ -157,7 +229,7 @@ export const useProjectStore = defineStore('project', () => {
       await init()
       return true
     } catch (error) {
-      console.error('更新阶段模板失败:', error)
+      console.error('Failed to update phase template:', error)
       return false
     }
   }
@@ -173,21 +245,18 @@ export const useProjectStore = defineStore('project', () => {
 
     try {
       const data = unwrapApiData<{ templates: ProjectPhaseTemplate[] }>(
-        await projectApi.reorderPhaseTemplates(projectId, templateIds) 
+        await projectApi.reorderPhaseTemplates(projectId, templateIds)
       )
 
       if (data?.templates) {
-        upsertProject({
-          ...project,
-          phaseTemplates: data.templates
-        })
+        upsertProject({ ...project, phaseTemplates: data.templates })
       } else {
         await init()
       }
 
       return true
     } catch (error) {
-      console.error('閲嶆帓闃舵妯℃澘澶辫触:', error)
+      console.error('Failed to reorder phase templates:', error)
       return false
     }
   }
@@ -202,12 +271,10 @@ export const useProjectStore = defineStore('project', () => {
 
     if (index < 0 || targetIndex < 0 || targetIndex >= templates.length) return false
 
-    // 交换位置
     const temp = templates[index]
     templates[index] = templates[targetIndex]
     templates[targetIndex] = temp
 
-    // 更新 order
     const templateIds = templates.map(t => t.id)
 
     try {
@@ -215,7 +282,7 @@ export const useProjectStore = defineStore('project', () => {
       await init()
       return true
     } catch (error) {
-      console.error('移动阶段模板失败:', error)
+      console.error('Failed to move phase template:', error)
       return false
     }
   }
@@ -224,17 +291,14 @@ export const useProjectStore = defineStore('project', () => {
     try {
       await projectApi.delete(id)
       projects.value = projects.value.filter(p => p.id !== id)
-      if (currentProjectId.value === id) {
-        currentProjectId.value = null
-      }
+      if (currentProjectId.value === id) currentProjectId.value = null
       return true
     } catch (error) {
-      console.error('删除项目失败:', error)
+      console.error('Failed to delete project:', error)
       return false
     }
   }
 
-  // 监听 WebSocket 事件
   wsService.on('project:create', (project: Project) => {
     upsertProject(project)
   })
@@ -260,6 +324,13 @@ export const useProjectStore = defineStore('project', () => {
     setCurrentProject,
     setSelectedPlanning,
     clearSelectedPlanning,
+    getProjectMemberUsers,
+    isProjectMember,
+    canOperateProject,
+    canManageProject,
+    fetchProjectMembers,
+    updateProjectMembers,
+    fetchReviewerCandidates,
     createProject,
     updateProject,
     deleteProject,

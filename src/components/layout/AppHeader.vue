@@ -60,7 +60,6 @@ function getProjectDetailLink(): string {
         <router-link :to="getNavLink('/members')" class="nav-link">成员</router-link>
         <router-link :to="getNavLink('/member-schedule')" class="nav-link">成员排期</router-link>
         <router-link v-if="isProjectManager" :to="getProjectDetailLink()" class="nav-link">项目详情</router-link>
-        <router-link v-if="isAdmin" to="/admin" class="nav-link">管理</router-link>
       </nav>
     </div>
     <div class="header-right">

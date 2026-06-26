@@ -580,7 +580,7 @@ function getRequirementProgressText(task: Task): string {
       @save="handleRequestSubmit"
     />
 
-    <TaskFilter @filter="handleFilter" />
+    <TaskFilter :project-id="projectStore.currentProjectId || undefined" @filter="handleFilter" />
 
     <div v-if="listEntries.length > 0" class="task-table">
       <div class="table-header">

@@ -513,7 +513,7 @@ function getRequirementProgressText(requirement: Task): string {
       @save="handleRequestSubmit"
     />
 
-    <TaskFilter :show-status-filter="false" @filter="handleFilter" />
+    <TaskFilter :show-status-filter="false" :project-id="projectStore.currentProjectId || undefined" @filter="handleFilter" />
 
     <div v-if="filteredTasks.length > 0" class="kanban-board" :class="{ 'show-abandoned': showAbandoned }">
       <div

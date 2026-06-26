@@ -9,7 +9,12 @@ const memberStore = useMemberStore()
 const taskStore = useTaskStore()
 const projectStore = useProjectStore()
 
-const users = computed(() => memberStore.members)
+const users = computed(() => {
+  if (projectId.value) {
+    return projectStore.getProjectMemberUsers(projectId.value)
+  }
+  return memberStore.members
+})
 const selectedRole = ref<string>('')
 
 // Get projectId and planningId from route

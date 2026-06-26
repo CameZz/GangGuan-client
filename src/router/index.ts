@@ -3,6 +3,7 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import type { RouteRecordRaw } from 'vue-router'
 import { useUserStore, useProjectStore, storesManager } from '@/stores'
+import { getSavedUser, getToken } from '@/api'
 
 const routes: RouteRecordRaw[] = [
   {
@@ -149,6 +150,9 @@ router.beforeEach(async (to) => {
   }
 
   if (to.name === 'Login' && userStore.isLoggedIn) {
+    if (getToken() && getSavedUser()) {
+      return true
+    }
     return '/projects'
   }
 
