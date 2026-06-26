@@ -18,6 +18,8 @@ import {
   WORK_SLOTS_PER_DAY
 } from '@/utils/workingSchedule'
 import MemberAvatar from '@/components/member/MemberAvatar.vue'
+import { taskApi } from '@/api/tasks'
+import { unwrapApiData } from '@/api'
 
 const props = defineProps<{
   task?: Task | null
@@ -82,7 +84,11 @@ const deleteError = ref('')
 const scheduleError = ref('')
 const selectedPhaseIndex = ref<number | null>(null)
 const editingCommentIndex = ref<number | null>(null)
+const editingReferenceIndex = ref<number | null>(null)
 const newCommentContent = ref('')
+const newReferenceType = ref<'design' | 'ui' | 'document' | 'link'>('link')
+const newReferenceTitle = ref('')
+const newReferenceUrl = ref('')
 const taskHistories = ref<TaskHistory[]>([])
 const progressHistories = ref<TaskProgressHistory[]>([])
 
@@ -159,7 +165,11 @@ watch([() => props.isOpen, () => props.task, () => props.initialParentRequiremen
     scheduleError.value = ''
     selectedPhaseIndex.value = null
     editingCommentIndex.value = null
+    editingReferenceIndex.value = null
     newCommentContent.value = ''
+    newReferenceType.value = 'link'
+    newReferenceTitle.value = ''
+    newReferenceUrl.value = ''
   }
 }, { immediate: true })
 
@@ -169,6 +179,22 @@ const isTaskItem = computed(() => form.value.itemType !== 'requirement')
 const isChildTaskCreation = computed(() => !!props.initialParentRequirementId && !props.task)
 const isProjectManager = computed(() => userStore.isAdmin || userStore.currentUser?.role === 'pm')
 const canEditBasicInfo = computed(() => !isEditing.value || isProjectManager.value)
+const isProjectMember = computed(() => {
+  const userId = userStore.currentUser?.id
+  return !!userId && members.value.some(m => m.id === userId)
+})
+function canEditComment(comment: Comment): boolean {
+  return isProjectManager.value || comment.authorId === userStore.currentUser?.id
+}
+function canDeleteComment(): boolean {
+  return isProjectManager.value
+}
+function canEditReference(reference: Reference): boolean {
+  return isProjectManager.value || reference.authorId === userStore.currentUser?.id
+}
+function canDeleteReference(): boolean {
+  return isProjectManager.value
+}
 
 const requirementOptions = computed(() => {
   if (!form.value.projectId || !form.value.planningId) return []
@@ -462,39 +488,119 @@ function handleItemTypeChange(itemType: TaskItemType) {
   // 服务端会在创建任务时自动生成阶段
 }
 
-function addReference() {
-  form.value.references.push({
-    type: 'link',
-    url: '',
-    title: ''
-  })
-}
-
-function removeReference(index: number) {
-  form.value.references.splice(index, 1)
-}
-
-function addComment() {
-  const content = newCommentContent.value.trim()
-  if (!content) return
-  const authorId = userStore.currentUser?.id || members.value[0]?.id
-  if (authorId) {
-    form.value.comments.push({
-      id: Date.now().toString(),
-      authorId,
-      content,
-      createdAt: new Date().toISOString()
+async function addReference() {
+  const url = newReferenceUrl.value.trim()
+  const title = newReferenceTitle.value.trim()
+  const type = newReferenceType.value
+  if (!url && !title) return
+  if (props.task?.id) {
+    try {
+      const res = unwrapApiData<any>(await taskApi.addReference(props.task.id, { type, url, title }))
+      if (res?.task) form.value.references = res.task.references
+      newReferenceType.value = 'link'
+      newReferenceTitle.value = ''
+      newReferenceUrl.value = ''
+    } catch (e) {
+      console.error('Failed to add reference:', e)
+    }
+  } else {
+    form.value.references.push({
+      type,
+      url,
+      title
     })
-    newCommentContent.value = ''
+    newReferenceType.value = 'link'
+    newReferenceTitle.value = ''
+    newReferenceUrl.value = ''
   }
 }
 
-function removeComment(index: number) {
-  form.value.comments.splice(index, 1)
-  if (editingCommentIndex.value === index) {
-    editingCommentIndex.value = null
-  } else if (editingCommentIndex.value !== null && editingCommentIndex.value > index) {
-    editingCommentIndex.value--
+async function removeReference(index: number) {
+  if (props.task?.id) {
+    const reference = form.value.references[index]
+    if (!reference) return
+    try {
+      const res = unwrapApiData<any>(await taskApi.deleteReference(props.task.id, reference.id!))
+      if (res?.task) form.value.references = res.task.references
+      editingReferenceIndex.value = null
+    } catch (e) {
+      console.error('Failed to delete reference:', e)
+    }
+  } else {
+    form.value.references.splice(index, 1)
+    if (editingReferenceIndex.value === index) {
+      editingReferenceIndex.value = null
+    } else if (editingReferenceIndex.value !== null && editingReferenceIndex.value > index) {
+      editingReferenceIndex.value--
+    }
+  }
+}
+
+function ensureProtocol(url: string): string {
+  if (!url) return ''
+  if (/^https?:\/\//i.test(url)) return url
+  return 'https://' + url
+}
+
+async function saveReference(index: number) {
+  if (!props.task?.id) return
+  const reference = form.value.references[index]
+  if (!reference || !reference.id) return
+  try {
+    const res = unwrapApiData<any>(await taskApi.updateReference(props.task.id, reference.id, {
+      type: reference.type,
+      url: reference.url,
+      title: reference.title
+    }))
+    if (res?.task) form.value.references = res.task.references
+  } catch (e) {
+    console.error('Failed to save reference:', e)
+  }
+}
+
+async function addComment() {
+  const content = newCommentContent.value.trim()
+  if (!content) return
+  if (props.task?.id) {
+    try {
+      const res = unwrapApiData<any>(await taskApi.addComment(props.task.id, { content }))
+      if (res?.task) form.value.comments = res.task.comments
+      newCommentContent.value = ''
+    } catch (e) {
+      console.error('Failed to add comment:', e)
+    }
+  } else {
+    const authorId = userStore.currentUser?.id || members.value[0]?.id
+    if (authorId) {
+      form.value.comments.push({
+        id: Date.now().toString(),
+        authorId,
+        content,
+        createdAt: new Date().toISOString()
+      })
+      newCommentContent.value = ''
+    }
+  }
+}
+
+async function removeComment(index: number) {
+  if (props.task?.id) {
+    const comment = form.value.comments[index]
+    if (!comment) return
+    try {
+      const res = unwrapApiData<any>(await taskApi.deleteComment(props.task.id, comment.id))
+      if (res?.task) form.value.comments = res.task.comments
+      editingCommentIndex.value = null
+    } catch (e) {
+      console.error('Failed to delete comment:', e)
+    }
+  } else {
+    form.value.comments.splice(index, 1)
+    if (editingCommentIndex.value === index) {
+      editingCommentIndex.value = null
+    } else if (editingCommentIndex.value !== null && editingCommentIndex.value > index) {
+      editingCommentIndex.value--
+    }
   }
 }
 
@@ -502,8 +608,35 @@ function startEditComment(index: number) {
   editingCommentIndex.value = index
 }
 
-function stopEditComment() {
+async function stopEditComment() {
+  if (editingCommentIndex.value === null) return
+  const comment = form.value.comments[editingCommentIndex.value]
+  if (props.task?.id && comment) {
+    try {
+      const res = unwrapApiData<any>(await taskApi.updateComment(props.task.id, comment.id, { content: comment.content }))
+      if (res?.task) form.value.comments = res.task.comments
+    } catch (e) {
+      console.error('Failed to update comment:', e)
+    }
+  }
   editingCommentIndex.value = null
+}
+
+function startEditReference(index: number) {
+  editingReferenceIndex.value = index
+}
+
+async function stopEditReference() {
+  if (editingReferenceIndex.value === null) return
+  await saveReference(editingReferenceIndex.value)
+  editingReferenceIndex.value = null
+}
+
+const referenceTypeLabels: Record<string, string> = {
+  design: '设计',
+  ui: 'UI',
+  document: '文档',
+  link: '链接'
 }
 
 function getMemberName(memberId: string): string {
@@ -1187,35 +1320,85 @@ function getProgressDelta(history: TaskProgressHistory): string {
           <div class="reference-list">
             <div
               v-for="(reference, index) in form.references"
-              :key="index"
+              :key="reference.id || index"
               class="reference-item"
             >
-              <select v-model="reference.type" class="input select">
-                <option value="design">设计</option>
-                <option value="ui">UI</option>
-                <option value="document">文档</option>
-                <option value="link">链接</option>
-              </select>
-              <input
-                v-model="reference.title"
-                type="text"
-                class="input"
-                placeholder="标题"
-              />
-              <input
-                v-model="reference.url"
-                type="text"
-                class="input"
-                placeholder="URL"
-              />
-              <button class="btn btn-ghost btn-sm" @click="removeReference(index)">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <path d="M18 6L6 18M6 6l12 12" />
-                </svg>
-              </button>
+              <template v-if="editingReferenceIndex === index">
+                <div class="reference-line1">
+                  <select v-model="reference.type" class="input select">
+                    <option value="design">设计</option>
+                    <option value="ui">UI</option>
+                    <option value="document">文档</option>
+                    <option value="link">链接</option>
+                  </select>
+                  <input
+                    v-model="reference.title"
+                    type="text"
+                    class="input"
+                    placeholder="标题"
+                  />
+                  <input
+                    v-model="reference.url"
+                    type="text"
+                    class="input"
+                    placeholder="URL"
+                  />
+                </div>
+                <div class="reference-line2">
+                  <span></span>
+                  <div class="reference-actions">
+                    <button class="btn btn-ghost btn-sm" @click="stopEditReference">完成</button>
+                  </div>
+                </div>
+              </template>
+              <template v-else>
+                <div class="reference-line1">
+                  <span class="reference-author-name">{{ getMemberName(reference.authorId || '') }}：</span>
+                  <span class="reference-type-badge">{{ referenceTypeLabels[reference.type] || reference.type }}</span>
+                  <span class="reference-title">{{ reference.title || '无标题' }}</span>
+                  <a
+                    v-if="reference.url"
+                    :href="ensureProtocol(reference.url)"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    class="reference-url-link"
+                    @click.stop
+                  >{{ reference.url }}</a>
+                  <span v-else class="reference-url-empty">无链接</span>
+                </div>
+                <div class="reference-line2">
+                  <span></span>
+                  <div class="reference-actions">
+                    <button v-if="canDeleteReference()" class="btn btn-ghost btn-sm comment-action-btn" @click="removeReference(index)">删除</button>
+                    <button v-if="canEditReference(reference)" class="btn btn-ghost btn-sm comment-action-btn" @click="startEditReference(index)">编辑</button>
+                    <span v-if="reference.createdAt" class="reference-date">{{ new Date(reference.createdAt).toLocaleString('zh-CN') }}</span>
+                  </div>
+                </div>
+              </template>
             </div>
           </div>
-          <button class="btn btn-secondary" @click="addReference">添加参考资料</button>
+          <div v-if="isProjectMember" class="reference-add-row">
+            <select v-model="newReferenceType" class="input select">
+              <option value="design">设计</option>
+              <option value="ui">UI</option>
+              <option value="document">文档</option>
+              <option value="link">链接</option>
+            </select>
+            <input
+              v-model="newReferenceTitle"
+              type="text"
+              class="input"
+              placeholder="标题"
+            />
+            <input
+              v-model="newReferenceUrl"
+              type="text"
+              class="input"
+              placeholder="URL"
+              @keyup.enter="addReference"
+            />
+            <button class="btn btn-primary btn-sm" @click="addReference">添加</button>
+          </div>
         </div>
 
         <div v-show="activeTab === 'comments'" class="tab-content">
@@ -1251,15 +1434,15 @@ function getProgressDelta(history: TaskProgressHistory): string {
                 <div class="comment-line2">
                   <span></span>
                   <div class="comment-actions">
-                    <button class="btn btn-ghost btn-sm comment-action-btn" @click="removeComment(index)">删除</button>
-                    <button class="btn btn-ghost btn-sm comment-action-btn" @click="startEditComment(index)">编辑</button>
+                    <button v-if="canDeleteComment()" class="btn btn-ghost btn-sm comment-action-btn" @click="removeComment(index)">删除</button>
+                    <button v-if="canEditComment(comment)" class="btn btn-ghost btn-sm comment-action-btn" @click="startEditComment(index)">编辑</button>
                     <span class="comment-date">{{ new Date(comment.createdAt).toLocaleString('zh-CN') }}</span>
                   </div>
                 </div>
               </template>
             </div>
           </div>
-          <div class="comment-add-row">
+          <div v-if="isProjectMember" class="comment-add-row">
             <input
               v-model="newCommentContent"
               type="text"
@@ -1311,7 +1494,7 @@ function getProgressDelta(history: TaskProgressHistory): string {
 <style scoped>
 .modal-lg {
   max-width: 960px;
-  max-height: 90vh;
+  height: 85vh;
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -1320,7 +1503,7 @@ function getProgressDelta(history: TaskProgressHistory): string {
 .modal-tabs {
   display: flex;
   gap: 4px;
-  padding: 0 24px;
+  padding: 0 16px;
   border-bottom: 1px solid var(--color-border);
   flex-shrink: 0;
 }
@@ -1332,7 +1515,7 @@ function getProgressDelta(history: TaskProgressHistory): string {
 }
 
 .tab {
-  padding: 12px 16px;
+  padding: 8px 16px;
   font-size: 14px;
   color: var(--color-text-secondary);
   background: none;
@@ -1352,7 +1535,7 @@ function getProgressDelta(history: TaskProgressHistory): string {
 }
 
 .tab-content {
-  padding: 16px 0;
+  padding: 0px 0;
 }
 
 .modal-title-row {
@@ -1954,13 +2137,16 @@ function getProgressDelta(history: TaskProgressHistory): string {
   display: flex;
   flex-direction: column;
   gap: 6px;
-  margin-bottom: 12px;
+  margin-bottom: 8px;
 }
 
 .reference-item {
+  padding: 4px 10px;
+  background-color: var(--color-bg-tertiary);
+  border-radius: var(--radius-md);
   display: flex;
-  gap: 8px;
-  align-items: center;
+  flex-direction: column;
+  gap: 2px;
 }
 
 .reference-item .input {
@@ -1972,12 +2158,12 @@ function getProgressDelta(history: TaskProgressHistory): string {
 }
 
 .comment-item {
-  padding: 8px 10px;
+  padding: 4px 10px;
   background-color: var(--color-bg-tertiary);
   border-radius: var(--radius-md);
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 2px;
 }
 
 .comment-line1 {
@@ -2034,6 +2220,88 @@ function getProgressDelta(history: TaskProgressHistory): string {
 
 .comment-add-row .input {
   flex: 1;
+}
+
+.reference-add-row {
+  display: flex;
+  gap: 8px;
+}
+
+.reference-add-row .input {
+  flex: 1;
+}
+
+.reference-add-row .select {
+  flex: 0 0 auto;
+  width: auto;
+}
+
+.reference-line1 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.reference-line2 {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.reference-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.reference-type-badge {
+  flex-shrink: 0;
+  padding: 1px 6px;
+  font-size: 12px;
+  border-radius: 4px;
+  background-color: var(--color-bg-tertiary);
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+}
+
+.reference-title {
+  font-weight: 600;
+  color: var(--color-text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.reference-url-link {
+  color: var(--color-primary);
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-decoration: none;
+}
+
+.reference-url-link:hover {
+  text-decoration: underline;
+}
+
+.reference-url-empty {
+  color: var(--color-text-muted);
+  font-size: 12px;
+}
+
+.reference-author-name {
+  font-weight: 600;
+  flex-shrink: 0;
+  color: var(--color-text-primary);
+  white-space: nowrap;
+}
+
+.reference-date {
+  font-size: 12px;
+  color: var(--color-text-muted);
 }
 
 .spacer {

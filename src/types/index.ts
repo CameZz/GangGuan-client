@@ -108,6 +108,9 @@ export interface TaskPhase {
 }
 
 export interface Reference {
+  id?: string
+  authorId?: string
+  createdAt?: string
   type: 'design' | 'ui' | 'document' | 'link'
   url: string
   title: string
