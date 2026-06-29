@@ -108,7 +108,7 @@ class StoresManager {
 
             // 获取待审批数量（仅 PM/管理员）
             if (this.userStore?.isProjectManager) {
-                this.approvalStore?.fetchApprovals?.({ status: 'pending' });
+                this.approvalStore?.fetchPendingReviewCount?.();
             }
 
             // 页面可见性变化时，通过 REST API 补拉最新任务数据

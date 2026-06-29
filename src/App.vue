@@ -7,7 +7,7 @@ import { useUserStore } from '@/stores'
 
 const route = useRoute()
 const userStore = useUserStore()
-const hideSidebarRoutes = ['/projects', '/login', '/admin', '/messages']
+const hideSidebarRoutes = ['/projects', '/login', '/admin', '/messages', '/approvals', '/my-approvals']
 const hideSidebarRouteNames = ['ProjectDetail']
 const hideSidebarPrefixes = ['/member-schedule']
 const showSidebar = computed(() => {

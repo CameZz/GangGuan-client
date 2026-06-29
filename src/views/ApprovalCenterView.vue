@@ -91,7 +91,8 @@ function formatFullTime(dateStr: string): string {
 async function fetchApprovals() {
   await approvalStore.fetchApprovals({
     status: statusFilter.value,
-    projectId: projectFilter.value
+    projectId: projectFilter.value,
+    scope: 'review'
   })
 }
 

@@ -8,10 +8,11 @@ export const approvalApi = {
     api.post('/approvals', data),
 
   // 获取审批列表
-  list: (params?: { status?: string; projectId?: string }) => {
+  list: (params?: { status?: string; projectId?: string; scope?: 'review' | 'submitted' }) => {
     const query = new URLSearchParams()
     if (params?.status && params.status !== 'all') query.set('status', params.status)
     if (params?.projectId && params.projectId !== 'all') query.set('projectId', params.projectId)
+    if (params?.scope) query.set('scope', params.scope)
     const qs = query.toString()
     return api.get(`/approvals${qs ? `?${qs}` : ''}`)
   },

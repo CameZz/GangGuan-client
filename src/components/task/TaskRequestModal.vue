@@ -351,6 +351,24 @@ function handleSubmit() {
 </template>
 
 <style scoped>
+.modal {
+  display: flex;
+  flex-direction: column;
+  max-height: min(90vh, 720px);
+  overflow: hidden;
+}
+
+.modal-header,
+.modal-footer {
+  flex-shrink: 0;
+}
+
+.modal-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
 .spacer {
   flex: 1;
 }
