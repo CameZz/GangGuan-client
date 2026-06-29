@@ -113,7 +113,13 @@ type ScheduledTaskPhase = TaskPhase & {
   endTime: string
 }
 
-type PhaseHealthStatus = 'not-started' | 'on-track' | 'behind' | 'overdue' | 'completed'
+enum PhaseHealthStatus {
+  NotStarted = 'not-started',
+  OnTrack = 'on-track',
+  Behind = 'behind',
+  Overdue = 'overdue',
+  Completed = 'completed'
+}
 
 const daySlots = computed<DaySlot[]>(() => {
   const start = timelineStart.value
@@ -232,41 +238,41 @@ const getPhaseHealthStatus = (phase: ScheduledTaskPhase): PhaseHealthStatus => {
   const workDuration = getEffectiveWorkingMinutes(start, end, workdayConfig.value)
   const elapsedWorkDuration = getEffectiveWorkingMinutes(start, nowDate, workdayConfig.value)
 
-  if (progress >= 100) return 'completed'
-  if (now < start.getTime()) return progress > 0 ? 'on-track' : 'not-started'
-  if (workDuration <= 0 && now > end.getTime() && isWorkday(nowDate)) return 'overdue'
-  if (workDuration > 0 && elapsedWorkDuration > workDuration) return 'overdue'
-  return progress >= getExpectedProgress(phase, now) ? 'on-track' : 'behind'
+  if (progress >= 100) return PhaseHealthStatus.Completed
+  if (now < start.getTime()) return progress > 0 ? PhaseHealthStatus.OnTrack : PhaseHealthStatus.NotStarted
+  if (workDuration <= 0 && now > end.getTime() && isWorkday(nowDate)) return PhaseHealthStatus.Overdue
+  if (workDuration > 0 && elapsedWorkDuration > workDuration) return PhaseHealthStatus.Overdue
+  return progress >= getExpectedProgress(phase, now) ? PhaseHealthStatus.OnTrack : PhaseHealthStatus.Behind
 }
 
 const phaseProgressColors: Record<PhaseHealthStatus, string> = {
-  'not-started': '#f59e0b',
-  'on-track': '#22c55e',
-  behind: '#dc2626',
-  overdue: '#dc2626',
-  completed: '#16a34a'
+  [PhaseHealthStatus.NotStarted]: '#f59e0b',
+  [PhaseHealthStatus.OnTrack]: '#22c55e',
+  [PhaseHealthStatus.Behind]: '#dc2626',
+  [PhaseHealthStatus.Overdue]: '#dc2626',
+  [PhaseHealthStatus.Completed]: '#16a34a'
 }
 
 const phaseProgressBackgroundColors: Record<PhaseHealthStatus, string> = {
-  'not-started': '#fef3c7',
-  'on-track': '#dcfce7',
-  behind: '#fee2e2',
-  overdue: '#fee2e2',
-  completed: '#dcfce7'
+  [PhaseHealthStatus.NotStarted]: '#fef3c7',
+  [PhaseHealthStatus.OnTrack]: '#dcfce7',
+  [PhaseHealthStatus.Behind]: '#fee2e2',
+  [PhaseHealthStatus.Overdue]: '#fee2e2',
+  [PhaseHealthStatus.Completed]: '#dcfce7'
 }
 
 const phaseStatusLabels: Record<PhaseHealthStatus, string> = {
-  'not-started': '未开始',
-  'on-track': '正常',
-  behind: '落后',
-  overdue: '超时',
-  completed: '已完成'
+  [PhaseHealthStatus.NotStarted]: '未开始',
+  [PhaseHealthStatus.OnTrack]: '正常',
+  [PhaseHealthStatus.Behind]: '落后',
+  [PhaseHealthStatus.Overdue]: '超时',
+  [PhaseHealthStatus.Completed]: '已完成'
 }
 
 const healthLegendItems = [
-  { status: 'not-started' as PhaseHealthStatus, label: '未开始' },
-  { status: 'on-track' as PhaseHealthStatus, label: '正常/超前/完成' },
-  { status: 'behind' as PhaseHealthStatus, label: '落后/超时' }
+  { status: PhaseHealthStatus.NotStarted, label: '未开始' },
+  { status: PhaseHealthStatus.OnTrack, label: '正常/超前/完成' },
+  { status: PhaseHealthStatus.Behind, label: '落后/超时' }
 ]
 
 const getPhaseProgressColor = (phase: ScheduledTaskPhase): string => {

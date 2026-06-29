@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { useApprovalStore, useProjectStore } from '@/stores'
-import type { TaskApprovalRequest, ApprovalStatus } from '@/types'
+import type { TaskApprovalRequest } from '@/types'
+import { ApprovalStatus } from '@/types'
+import { ApprovalListScope } from '@/stores/approval'
 
 const approvalStore = useApprovalStore()
 const projectStore = useProjectStore()
@@ -66,7 +68,7 @@ async function fetchApprovals() {
   await approvalStore.fetchApprovals({
     status: statusFilter.value,
     projectId: projectFilter.value,
-    scope: 'submitted'
+    scope: ApprovalListScope.Submitted
   })
 }
 
@@ -110,7 +112,7 @@ onMounted(() => {
     <div class="filter-bar">
       <div class="status-filters">
         <button
-          v-for="status in (['all', 'pending', 'approved', 'rejected', 'cancelled'] as const)"
+          v-for="status in (['all', ApprovalStatus.Pending, ApprovalStatus.Approved, ApprovalStatus.Rejected, ApprovalStatus.Cancelled] as const)"
           :key="status"
           class="filter-chip"
           :class="{ active: statusFilter === status }"

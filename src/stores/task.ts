@@ -2,7 +2,8 @@
 
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import type { ProjectPhaseTemplate, Task, TaskPhase, TaskStatus, TaskPriority, TaskHistory, TaskProgressHistory } from '@/types'
+import type { ProjectPhaseTemplate, Task, TaskPhase, TaskPriority, TaskHistory, TaskProgressHistory } from '@/types'
+import { TaskStatus, WSMessageType } from '@/types'
 import { taskApi } from '@/api/tasks'
 import { historyApi } from '@/api/histories'
 import { unwrapApiData } from '@/api'
@@ -216,7 +217,7 @@ export const useTaskStore = defineStore('task', () => {
 
     if (isTaskItem(task)) {
       if (task.status === 'abandoned') return true
-      const updated = await moveTask(id, 'abandoned')
+      const updated = await moveTask(id, TaskStatus.Abandoned)
       return !!updated
     }
 
@@ -341,14 +342,14 @@ export const useTaskStore = defineStore('task', () => {
   }
 
   // 监听 WebSocket 事件
-  wsService.on('task:create', (task: Task) => {
+  wsService.on(WSMessageType.TaskCreate, (task: Task) => {
     console.log('[WS] task:create received', task?.id, task?.title)
     if (!tasks.value.find(t => t.id === task.id)) {
       tasks.value.push(task)
     }
   })
 
-  wsService.on('task:update', (task: Task) => {
+  wsService.on(WSMessageType.TaskUpdate, (task: Task) => {
     console.log('[WS] task:update received', task?.id)
     const index = tasks.value.findIndex(t => t.id === task.id)
     if (index !== -1) {
@@ -356,7 +357,7 @@ export const useTaskStore = defineStore('task', () => {
     }
   })
 
-  wsService.on('task:delete', ({ id }: { id: string }) => {
+  wsService.on(WSMessageType.TaskDelete, ({ id }: { id: string }) => {
     console.log('[WS] task:delete received', id)
     tasks.value = tasks.value.filter(t => t.id !== id)
   })

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, watch, computed } from 'vue'
-import type { Task, TaskStatus, TaskPriority, TaskStage, TaskPhase, Reference, Comment, RoleType, TaskHistory, TaskProgressHistory, TaskItemType, ProjectPhaseTemplate } from '@/types'
-import { HISTORY_FIELD_LABELS, ROLES } from '@/types'
+import type { Task, TaskPhase, Reference, Comment, RoleType, TaskHistory, TaskProgressHistory, ProjectPhaseTemplate } from '@/types'
+import { HISTORY_FIELD_LABELS, ROLES, ReferenceType, TaskItemType, TaskPriority, TaskStage, TaskStatus } from '@/types'
 import { useMemberStore, usePlanningStore, useProjectStore, useTaskStore, useUserStore } from '@/stores'
 import { createTaskPhaseFromTemplate, getPhaseStatus, getTaskPhaseProgress, getTaskStageLabel, normalizeTaskPhases } from '@/utils/taskPhases'
 import {
@@ -62,15 +62,15 @@ const plannings = computed(() => planningStore.plannings)
 const PREVIEW_DAYS = 15
 
 const form = ref({
-  itemType: 'task' as TaskItemType,
+  itemType: TaskItemType.Task,
   parentRequirementId: null as string | null,
   title: '',
   description: '',
-  status: 'todo' as TaskStatus,
-  priority: 'medium' as TaskPriority,
+  status: TaskStatus.Todo as TaskStatus,
+  priority: TaskPriority.Medium,
   dueDate: '',
   assigneeId: null as string | null,
-  stage: 'filed' as TaskStage,
+  stage: TaskStage.Filed as TaskStage,
   phases: [] as TaskPhase[],
   currentPhaseId: null as string | null,
   planningId: null as string | null,
@@ -86,7 +86,7 @@ const selectedPhaseIndex = ref<number | null>(null)
 const editingCommentIndex = ref<number | null>(null)
 const editingReferenceIndex = ref<number | null>(null)
 const newCommentContent = ref('')
-const newReferenceType = ref<'design' | 'ui' | 'document' | 'link'>('link')
+const newReferenceType = ref<ReferenceType>(ReferenceType.Link)
 const newReferenceTitle = ref('')
 const newReferenceUrl = ref('')
 const taskHistories = ref<TaskHistory[]>([])
@@ -96,7 +96,7 @@ watch([() => props.isOpen, () => props.task, () => props.initialParentRequiremen
   if (open && props.task) {
     loadHistories()
     form.value = {
-      itemType: props.task.itemType || 'task',
+      itemType: props.task.itemType || TaskItemType.Task,
       parentRequirementId: props.task.parentRequirementId || null,
       title: props.task.title,
       description: props.task.description,
@@ -104,7 +104,7 @@ watch([() => props.isOpen, () => props.task, () => props.initialParentRequiremen
       priority: props.task.priority,
       dueDate: props.task.dueDate ? props.task.dueDate.split('T')[0] : '',
       assigneeId: props.task.assigneeId,
-      stage: props.task.stage || 'filed',
+      stage: props.task.stage || TaskStage.Filed,
       phases: normalizeTaskPhases(props.task.phases),
       currentPhaseId: props.task.currentPhaseId || null,
       planningId: props.task.planningId || null,
@@ -117,15 +117,15 @@ watch([() => props.isOpen, () => props.task, () => props.initialParentRequiremen
     taskHistories.value = []
     progressHistories.value = []
     form.value = {
-      itemType: 'task',
+      itemType: TaskItemType.Task,
       parentRequirementId: props.initialRequest.parentRequirementId || null,
       title: props.initialRequest.title,
       description: props.initialRequest.description,
-      status: 'todo',
-      priority: 'medium',
+      status: TaskStatus.Todo,
+      priority: TaskPriority.Medium,
       dueDate: '',
       assigneeId: null,
-      stage: 'filed',
+      stage: TaskStage.Filed,
       phases: normalizeTaskPhases(props.initialRequest.phases),
       currentPhaseId: null,
       planningId: props.initialRequest.planningId || null,
@@ -142,15 +142,15 @@ watch([() => props.isOpen, () => props.task, () => props.initialParentRequiremen
     const projectId = parentRequirement?.projectId || props.projectId || ''
     // 服务端会在创建任务时自动生成阶段，客户端传递空数组
     form.value = {
-      itemType: 'task',
+      itemType: TaskItemType.Task,
       parentRequirementId: parentRequirement?.id || null,
       title: '',
       description: '',
-      status: 'todo',
-      priority: 'medium',
+      status: TaskStatus.Todo,
+      priority: TaskPriority.Medium,
       dueDate: '',
       assigneeId: null,
-      stage: 'filed',
+      stage: TaskStage.Filed,
       phases: [],
       currentPhaseId: null,
       planningId: props.initialPlanningId || null,
@@ -167,15 +167,15 @@ watch([() => props.isOpen, () => props.task, () => props.initialParentRequiremen
     editingCommentIndex.value = null
     editingReferenceIndex.value = null
     newCommentContent.value = ''
-    newReferenceType.value = 'link'
+    newReferenceType.value = ReferenceType.Link
     newReferenceTitle.value = ''
     newReferenceUrl.value = ''
   }
 }, { immediate: true })
 
 const isEditing = computed(() => !!props.task)
-const isRequirementItem = computed(() => form.value.itemType === 'requirement')
-const isTaskItem = computed(() => form.value.itemType !== 'requirement')
+const isRequirementItem = computed(() => form.value.itemType === TaskItemType.Requirement)
+const isTaskItem = computed(() => form.value.itemType !== TaskItemType.Requirement)
 const isChildTaskCreation = computed(() => !!props.initialParentRequirementId && !props.task)
 const isProjectManager = computed(() => userStore.isAdmin || userStore.currentUser?.role === 'pm')
 const canEditBasicInfo = computed(() => !isEditing.value || isProjectManager.value)
@@ -210,7 +210,7 @@ const childTasks = computed(() => {
 
 const deleteBlockedReason = computed(() => {
   if (!props.task) return ''
-  if (isTaskItem.value && form.value.status === 'abandoned') {
+  if (isTaskItem.value && form.value.status === TaskStatus.Abandoned) {
     return '该任务单已是废弃状态'
   }
   if (isRequirementItem.value && childTasks.value.length > 0) {
@@ -220,7 +220,7 @@ const deleteBlockedReason = computed(() => {
 })
 
 const deleteActionLabel = computed(() => {
-  if (isTaskItem.value) return form.value.status === 'abandoned' ? '已废弃' : '废弃任务单'
+  if (isTaskItem.value) return form.value.status === TaskStatus.Abandoned ? '已废弃' : '废弃任务单'
   return '删除需求单'
 })
 
@@ -447,10 +447,10 @@ function handleSubmit() {
     ? {
         ...form.value,
         parentRequirementId: null,
-        status: 'todo',
+        status: TaskStatus.Todo,
         dueDate: null,
         assigneeId: null,
-        stage: 'filed',
+        stage: TaskStage.Filed,
         phases: [],
         currentPhaseId: null
       }
@@ -477,7 +477,7 @@ function handleDelete() {
 
 function handleItemTypeChange(itemType: TaskItemType) {
   form.value.itemType = itemType
-  if (itemType === 'requirement') {
+  if (itemType === TaskItemType.Requirement) {
     form.value.parentRequirementId = null
     form.value.assigneeId = null
     form.value.dueDate = ''
@@ -497,7 +497,7 @@ async function addReference() {
     try {
       const res = unwrapApiData<any>(await taskApi.addReference(props.task.id, { type, url, title }))
       if (res?.task) form.value.references = res.task.references
-      newReferenceType.value = 'link'
+      newReferenceType.value = ReferenceType.Link
       newReferenceTitle.value = ''
       newReferenceUrl.value = ''
     } catch (e) {
@@ -509,7 +509,7 @@ async function addReference() {
       url,
       title
     })
-    newReferenceType.value = 'link'
+    newReferenceType.value = ReferenceType.Link
     newReferenceTitle.value = ''
     newReferenceUrl.value = ''
   }
@@ -903,16 +903,16 @@ function getProgressDelta(history: TaskProgressHistory): string {
           <div v-if="!isEditing" class="type-selector type-selector--header">
             <button
               class="type-option"
-              :class="{ active: form.itemType === 'requirement' }"
+              :class="{ active: form.itemType === TaskItemType.Requirement }"
               :disabled="isChildTaskCreation"
-              @click="handleItemTypeChange('requirement')"
+              @click="handleItemTypeChange(TaskItemType.Requirement)"
             >
               需求单
             </button>
             <button
               class="type-option"
-              :class="{ active: form.itemType === 'task' }"
-              @click="handleItemTypeChange('task')"
+              :class="{ active: form.itemType === TaskItemType.Task }"
+              @click="handleItemTypeChange(TaskItemType.Task)"
             >
               任务单
             </button>

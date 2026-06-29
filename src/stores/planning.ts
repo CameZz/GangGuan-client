@@ -6,6 +6,7 @@ import type { Planning } from '@/types'
 import { planningApi } from '@/api/plannings'
 import { unwrapApiData } from '@/api'
 import { wsService } from '@/utils/websocket'
+import { WSMessageType } from '@/types'
 
 export const usePlanningStore = defineStore('planning', () => {
   const plannings = ref<Planning[]>([])
@@ -106,20 +107,20 @@ export const usePlanningStore = defineStore('planning', () => {
   }
 
   // 监听 WebSocket 事件
-  wsService.on('planning:create', (planning: Planning) => {
+  wsService.on(WSMessageType.PlanningCreate, (planning: Planning) => {
     if (!plannings.value.find(p => p.id === planning.id)) {
       plannings.value.push(planning)
     }
   })
 
-  wsService.on('planning:update', (planning: Planning) => {
+  wsService.on(WSMessageType.PlanningUpdate, (planning: Planning) => {
     const index = plannings.value.findIndex(p => p.id === planning.id)
     if (index !== -1) {
       plannings.value[index] = planning
     }
   })
 
-  wsService.on('planning:delete', ({ id }: { id: string }) => {
+  wsService.on(WSMessageType.PlanningDelete, ({ id }: { id: string }) => {
     plannings.value = plannings.value.filter(p => p.id !== id)
   })
 

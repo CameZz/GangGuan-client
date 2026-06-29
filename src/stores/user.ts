@@ -7,6 +7,7 @@ import { unwrapApiData, setToken, removeToken, getToken, setSavedUser, removeSav
 import { authApi } from '@/api/auth'
 import { userApi } from '@/api/users'
 import { wsService } from '@/utils/websocket'
+import { WSMessageType } from '@/types'
 
 const LOGOUT_FLAG_KEY = 'gangguan:logged-out'
 
@@ -198,13 +199,13 @@ export const useUserStore = defineStore('user', () => {
     }
   }
 
-  wsService.on('user:update', (user: User) => {
+  wsService.on(WSMessageType.UserUpdate, (user: User) => {
     if (currentUser.value?.id === user.id) {
       currentUser.value = normalizeUser(user)
     }
   })
 
-  wsService.on('user:delete', ({ id }: { id: string }) => {
+  wsService.on(WSMessageType.UserDelete, ({ id }: { id: string }) => {
     if (currentUser.value?.id === id) {
       wsService.disconnect()
       currentUser.value = null

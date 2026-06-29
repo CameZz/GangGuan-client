@@ -3,7 +3,8 @@ import { ref, computed, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useUserStore, useMemberStore, useProjectStore, storesManager } from '@/stores'
 import { ROLES } from '@/types'
-import type { User, RoleType, Project } from '@/types'
+import type { User, Project } from '@/types'
+import { RoleType } from '@/types'
 import MemberManagementModal from '@/components/admin/MemberManagementModal.vue'
 import ProjectModal from '@/components/project/ProjectModal.vue'
 import { createDefaultPhaseTemplates } from '@/utils/taskPhases'
@@ -185,7 +186,7 @@ const form = ref({
   name: '',
   phone: '',
   email: '',
-  role: 'pm' as RoleType,
+  role: RoleType.PM,
   avatar: '',
   isAdmin: false
 })
@@ -199,7 +200,7 @@ function openNewUserModal() {
     name: '',
     phone: '',
     email: '',
-    role: 'pm',
+    role: RoleType.PM,
     avatar: '',
     isAdmin: false
   }

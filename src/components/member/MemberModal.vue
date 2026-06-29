@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, watch, computed } from 'vue'
-import type { Member, RoleType } from '@/types'
+import type { Member } from '@/types'
+import { RoleType } from '@/types'
 import { ROLES } from '@/types'
 
 const props = defineProps<{
@@ -19,7 +20,7 @@ const form = ref({
   name: '',
   email: '',
   avatar: '',
-  role: 'pm' as RoleType
+  role: RoleType.PM
 })
 
 watch(() => props.isOpen, (open) => {
@@ -28,14 +29,14 @@ watch(() => props.isOpen, (open) => {
       name: props.member.name,
       email: props.member.email,
       avatar: props.member.avatar,
-      role: props.member.role || 'pm'
+      role: props.member.role || RoleType.PM
     }
   } else if (open) {
     form.value = {
       name: '',
       email: '',
       avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${Date.now()}`,
-      role: 'pm'
+      role: RoleType.PM
     }
   }
 })

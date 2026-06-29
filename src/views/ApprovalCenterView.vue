@@ -2,7 +2,9 @@
 import { ref, computed, onMounted, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { useApprovalStore, useProjectStore, useUserStore, usePlanningStore, useTaskStore } from '@/stores'
-import type { TaskApprovalRequest, ApprovalStatus, PhaseSnapshotItem } from '@/types'
+import type { TaskApprovalRequest, PhaseSnapshotItem } from '@/types'
+import { ApprovalStatus } from '@/types'
+import { ApprovalListScope } from '@/stores/approval'
 import { ROLES } from '@/types'
 import MemberAvatar from '@/components/member/MemberAvatar.vue'
 import TaskModal from '@/components/task/TaskModal.vue'
@@ -14,7 +16,7 @@ const userStore = useUserStore()
 const planningStore = usePlanningStore()
 const taskStore = useTaskStore()
 
-const statusFilter = ref<ApprovalStatus | 'all'>('pending')
+const statusFilter = ref<ApprovalStatus | 'all'>(ApprovalStatus.Pending)
 const projectFilter = ref<string | 'all'>('all')
 
 // 驳回弹框
@@ -92,7 +94,7 @@ async function fetchApprovals() {
   await approvalStore.fetchApprovals({
     status: statusFilter.value,
     projectId: projectFilter.value,
-    scope: 'review'
+    scope: ApprovalListScope.Review
   })
 }
 
@@ -132,7 +134,7 @@ async function handleApprove(approval: TaskApprovalRequest) {
       order: index,
       assigneeId: p.assigneeId,
       progress: 0,
-      status: 'pending',
+      status: ApprovalStatus.Pending,
       startTime: null,
       endTime: null
     }))
@@ -247,7 +249,7 @@ onMounted(() => {
     <div class="filter-bar">
       <div class="status-filters">
         <button
-          v-for="status in (['all', 'pending', 'approved', 'rejected'] as const)"
+          v-for="status in (['all', ApprovalStatus.Pending, ApprovalStatus.Approved, ApprovalStatus.Rejected] as const)"
           :key="status"
           class="filter-chip"
           :class="{ active: statusFilter === status }"

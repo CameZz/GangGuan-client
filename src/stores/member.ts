@@ -4,6 +4,7 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import type { Member, User } from '@/types'
 import { wsService } from '@/utils/websocket'
+import { WSMessageType } from '@/types'
 
 export const useMemberStore = defineStore('member', () => {
   const members = ref<Member[]>([])
@@ -37,14 +38,14 @@ export const useMemberStore = defineStore('member', () => {
     members.value = []
   }
 
-  wsService.on('user:create', (user: User) => {
+  wsService.on(WSMessageType.UserCreate, (user: User) => {
     const member = userToMember(user)
     if (!members.value.find(item => item.id === member.id)) {
       members.value.push(member)
     }
   })
 
-  wsService.on('user:update', (user: User) => {
+  wsService.on(WSMessageType.UserUpdate, (user: User) => {
     const member = userToMember(user)
     const index = members.value.findIndex(item => item.id === member.id)
     if (index !== -1) {
@@ -54,7 +55,7 @@ export const useMemberStore = defineStore('member', () => {
     }
   })
 
-  wsService.on('user:delete', ({ id }: { id: string }) => {
+  wsService.on(WSMessageType.UserDelete, ({ id }: { id: string }) => {
     members.value = members.value.filter(item => item.id !== id)
   })
 

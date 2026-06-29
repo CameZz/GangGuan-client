@@ -1,12 +1,42 @@
 // Type definitions for the project management system
 
-export type TaskStatus = 'todo' | 'in-progress' | 'done' | 'abandoned'
-export type TaskPriority = 'low' | 'medium' | 'high'
-export type TaskItemType = 'requirement' | 'task'
-export type TaskPhaseStatus = 'pending' | 'in-progress' | 'done'
+export enum TaskStatus {
+  Todo = 'todo',
+  InProgress = 'in-progress',
+  Done = 'done',
+  Abandoned = 'abandoned'
+}
+
+export enum TaskPriority {
+  Low = 'low',
+  Medium = 'medium',
+  High = 'high'
+}
+
+export enum TaskItemType {
+  Requirement = 'requirement',
+  Task = 'task'
+}
+
+export enum TaskPhaseStatus {
+  Pending = 'pending',
+  InProgress = 'in-progress',
+  Done = 'done'
+}
 
 // Role types
-export type RoleType = 'pm' | 'planner' | 'artist' | 'ui' | 'server' | 'client' | 'devops' | 'animator' | 'sound' | 'tester'
+export enum RoleType {
+  PM = 'pm',
+  Planner = 'planner',
+  Artist = 'artist',
+  UI = 'ui',
+  Server = 'server',
+  Client = 'client',
+  DevOps = 'devops',
+  Animator = 'animator',
+  Sound = 'sound',
+  Tester = 'tester'
+}
 
 export interface Role {
   type: RoleType
@@ -15,29 +45,53 @@ export interface Role {
 }
 
 export const ROLES: Role[] = [
-  { type: 'pm', name: 'PM', canManageAll: true },
-  { type: 'planner', name: '策划', canManageAll: false },
-  { type: 'artist', name: '美术', canManageAll: false },
-  { type: 'ui', name: 'UI', canManageAll: false },
-  { type: 'server', name: '程序(服务端)', canManageAll: false },
-  { type: 'client', name: '程序(客户端)', canManageAll: false },
-  { type: 'devops', name: '运维', canManageAll: false },
-  { type: 'animator', name: '动作/特效', canManageAll: false },
-  { type: 'sound', name: '音效', canManageAll: false },
-  { type: 'tester', name: '测试', canManageAll: false }
+  { type: RoleType.PM, name: 'PM', canManageAll: true },
+  { type: RoleType.Planner, name: '策划', canManageAll: false },
+  { type: RoleType.Artist, name: '美术', canManageAll: false },
+  { type: RoleType.UI, name: 'UI', canManageAll: false },
+  { type: RoleType.Server, name: '程序(服务端)', canManageAll: false },
+  { type: RoleType.Client, name: '程序(客户端)', canManageAll: false },
+  { type: RoleType.DevOps, name: '运维', canManageAll: false },
+  { type: RoleType.Animator, name: '动作/特效', canManageAll: false },
+  { type: RoleType.Sound, name: '音效', canManageAll: false },
+  { type: RoleType.Tester, name: '测试', canManageAll: false }
 ]
 
 // Task stage types
-export type TaskStage = 'filed' | 'designing' | 'initial' | 'preliminary' | 'final' | 'finalAcceptance' | 'completed'
+export enum TaskStage {
+  Filed = 'filed',
+  Designing = 'designing',
+  Initial = 'initial',
+  Preliminary = 'preliminary',
+  Final = 'final',
+  FinalAcceptance = 'finalAcceptance',
+  Completed = 'completed'
+}
+
+export enum ReferenceType {
+  Design = 'design',
+  UI = 'ui',
+  Document = 'document',
+  Link = 'link'
+}
+
+export const TASK_STAGE_LABELS: Record<TaskStage, string> = {
+  filed: '立案',
+  designing: '设计',
+  initial: '初版实现',
+  preliminary: '初步验收',
+  final: '终版完成',
+  finalAcceptance: '最终验收',
+  completed: '完成'
+}
 
 export const TASK_STAGES = [
-  { value: 'filed', label: '立案' },
-  { value: 'designing', label: '设计' },
-  { value: 'initial', label: '初版实现' },
-  { value: 'preliminary', label: '初步验收' },
-  { value: 'final', label: '终版完成' },
-  { value: 'finalAcceptance', label: '最终验收' },
-  { value: 'completed', label: '完成' }
+  { value: TaskStage.Filed, label: TASK_STAGE_LABELS.filed },
+  { value: TaskStage.Designing, label: TASK_STAGE_LABELS.designing },
+  { value: TaskStage.Initial, label: TASK_STAGE_LABELS.initial },
+  { value: TaskStage.Preliminary, label: TASK_STAGE_LABELS.preliminary },
+  { value: TaskStage.Final, label: TASK_STAGE_LABELS.final },
+  { value: TaskStage.FinalAcceptance, label: TASK_STAGE_LABELS.finalAcceptance }
 ] as const
 
 export interface ProjectPhaseTemplate {
@@ -111,7 +165,7 @@ export interface Reference {
   id?: string
   authorId?: string
   createdAt?: string
-  type: 'design' | 'ui' | 'document' | 'link'
+  type: ReferenceType
   url: string
   title: string
 }
@@ -177,8 +231,7 @@ export function formatHistoryValue(field: string, value: string): string {
     return map[value] || value
   }
   if (field === 'stage') {
-    const stage = TASK_STAGES.find(s => s.value === value)
-    return stage?.label || value
+    return TASK_STAGE_LABELS[value as TaskStage] || value
   }
   if (field === 'dueDate') {
     return value === '空' ? '空' : new Date(value).toLocaleDateString('zh-CN')
@@ -208,7 +261,12 @@ export interface Task {
 }
 
 // Approval request types
-export type ApprovalStatus = 'pending' | 'approved' | 'rejected' | 'cancelled'
+export enum ApprovalStatus {
+  Pending = 'pending',
+  Approved = 'approved',
+  Rejected = 'rejected',
+  Cancelled = 'cancelled'
+}
 
 export interface PhaseSnapshotItem {
   name: string
@@ -240,7 +298,16 @@ export interface TaskApprovalRequest {
 }
 
 // Notification types
-export type NotificationType = 'progress_update' | 'behind_progress' | 'comment' | 'reference' | 'approval_submitted' | 'approval_approved' | 'approval_rejected' | 'approval_cancelled'
+export enum NotificationType {
+  ProgressUpdate = 'progress_update',
+  BehindProgress = 'behind_progress',
+  Comment = 'comment',
+  Reference = 'reference',
+  ApprovalSubmitted = 'approval_submitted',
+  ApprovalApproved = 'approval_approved',
+  ApprovalRejected = 'approval_rejected',
+  ApprovalCancelled = 'approval_cancelled'
+}
 
 export interface Notification {
   id: string
@@ -259,15 +326,32 @@ export interface Notification {
 }
 
 // WebSocket message types
-export type WSMessageType =
-  | 'task:create' | 'task:update' | 'task:delete'
-  | 'project:create' | 'project:update' | 'project:delete'
-  | 'member:create' | 'member:update' | 'member:delete'
-  | 'planning:create' | 'planning:update' | 'planning:delete'
-  | 'user:login' | 'user:logout' | 'user:create' | 'user:update' | 'user:delete'
-  | 'sync:init' | 'sync:update'
-  | 'notification:create' | 'notification:update' | 'notification:read-all'
-  | 'approval:create' | 'approval:update'
+export enum WSMessageType {
+  TaskCreate = 'task:create',
+  TaskUpdate = 'task:update',
+  TaskDelete = 'task:delete',
+  ProjectCreate = 'project:create',
+  ProjectUpdate = 'project:update',
+  ProjectDelete = 'project:delete',
+  MemberCreate = 'member:create',
+  MemberUpdate = 'member:update',
+  MemberDelete = 'member:delete',
+  PlanningCreate = 'planning:create',
+  PlanningUpdate = 'planning:update',
+  PlanningDelete = 'planning:delete',
+  UserLogin = 'user:login',
+  UserLogout = 'user:logout',
+  UserCreate = 'user:create',
+  UserUpdate = 'user:update',
+  UserDelete = 'user:delete',
+  SyncInit = 'sync:init',
+  SyncUpdate = 'sync:update',
+  NotificationCreate = 'notification:create',
+  NotificationUpdate = 'notification:update',
+  NotificationReadAll = 'notification:read-all',
+  ApprovalCreate = 'approval:create',
+  ApprovalUpdate = 'approval:update'
+}
 
 export interface WSMessage {
   type: WSMessageType

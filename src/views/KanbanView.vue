@@ -2,6 +2,7 @@
 import { ref, computed, watchEffect, watch, nextTick, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import type { Task, TaskStage, TaskStatus, TaskPriority } from '@/types'
+import { TaskItemType, TaskPriority as TaskPriorityEnum, TaskStage as TaskStageEnum, TaskStatus as TaskStatusEnum } from '@/types'
 import { useTaskStore, useProjectStore, useUserStore, usePlanningStore, useApprovalStore } from '@/stores'
 import TaskCard from '@/components/task/TaskCard.vue'
 import TaskModal from '@/components/task/TaskModal.vue'
@@ -134,7 +135,7 @@ const columns = computed(() => {
   if (showAbandoned.value) {
     const tasks = filteredTasks.value.filter(t => t.status === 'abandoned')
     cols.push({
-      id: 'abandoned',
+      id: TaskStatusEnum.Abandoned,
       title: '已废弃',
       tasks,
       entries: buildKanbanEntries(tasks),
@@ -416,14 +417,14 @@ async function handleSave(taskData: Partial<Task>) {
     saved = await taskStore.createTask({
       title: taskData.title || '',
       description: taskData.description || '',
-      itemType: taskData.itemType || 'task',
+      itemType: taskData.itemType || TaskItemType.Task,
       parentRequirementId: taskData.parentRequirementId || null,
-      status: taskData.status || 'todo',
-      priority: taskData.priority || 'medium',
+      status: taskData.status || TaskStatusEnum.Todo,
+      priority: taskData.priority || TaskPriorityEnum.Medium,
       dueDate: taskData.dueDate || null,
       projectId: taskData.projectId || projectStore.currentProjectId || '',
       assigneeId: taskData.assigneeId || null,
-      stage: taskData.stage || 'filed',
+      stage: taskData.stage || TaskStageEnum.Filed,
       phases: taskData.phases || [],
       currentPhaseId: taskData.currentPhaseId || null,
       planningId: taskData.planningId || null,

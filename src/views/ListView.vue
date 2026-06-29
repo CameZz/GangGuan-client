@@ -2,6 +2,7 @@
 import { ref, computed, watchEffect } from 'vue'
 import { useRoute } from 'vue-router'
 import type { Task, TaskStatus, TaskStage, TaskPriority } from '@/types'
+import { TaskItemType, TaskPriority as TaskPriorityEnum, TaskStage as TaskStageEnum, TaskStatus as TaskStatusEnum } from '@/types'
 import { useTaskStore, useProjectStore, useMemberStore, useUserStore, usePlanningStore, useApprovalStore } from '@/stores'
 import TaskModal from '@/components/task/TaskModal.vue'
 import TaskRequestModal from '@/components/task/TaskRequestModal.vue'
@@ -62,10 +63,21 @@ const requestSaving = ref(false)
 const requestError = ref('')
 
 // 排序状态
-type SortField = 'title' | 'status' | 'stage' | 'priority' | 'assignee' | 'dueDate' | null
-type SortDirection = 'asc' | 'desc' | null
-const sortField = ref<SortField>(null)
-const sortDirection = ref<SortDirection>(null)
+enum SortField {
+  Title = 'title',
+  Status = 'status',
+  Stage = 'stage',
+  Priority = 'priority',
+  Assignee = 'assignee',
+  DueDate = 'dueDate'
+}
+
+enum SortDirection {
+  Asc = 'asc',
+  Desc = 'desc'
+}
+const sortField = ref<SortField | null>(null)
+const sortDirection = ref<SortDirection | null>(null)
 
 // 状态排序权重
 const statusOrder: Record<string, number> = {
@@ -103,9 +115,9 @@ function windowsCompare(a: string, b: string): number {
 function toggleSort(field: SortField) {
   if (sortField.value !== field) {
     sortField.value = field
-    sortDirection.value = 'asc'
-  } else if (sortDirection.value === 'asc') {
-    sortDirection.value = 'desc'
+    sortDirection.value = SortDirection.Asc
+  } else if (sortDirection.value === SortDirection.Asc) {
+    sortDirection.value = SortDirection.Desc
   } else {
     sortField.value = null
     sortDirection.value = null
@@ -114,8 +126,8 @@ function toggleSort(field: SortField) {
 
 function getSortIcon(field: SortField): string {
   if (sortField.value !== field) return ''
-  if (sortDirection.value === 'asc') return ' ↑'
-  if (sortDirection.value === 'desc') return ' ↓'
+  if (sortDirection.value === SortDirection.Asc) return ' ↑'
+  if (sortDirection.value === SortDirection.Desc) return ' ↓'
   return ''
 }
 
@@ -221,23 +233,23 @@ const filteredTasks = computed(() => {
 
   // 排序
   if (sortField.value && sortDirection.value) {
-    const dir = sortDirection.value === 'asc' ? 1 : -1
+    const dir = sortDirection.value === SortDirection.Asc ? 1 : -1
     tasks = [...tasks].sort((a, b) => {
       switch (sortField.value) {
-        case 'title':
+        case SortField.Title:
           return windowsCompare(a.title, b.title) * dir
-        case 'status':
+        case SortField.Status:
           return ((statusOrder[a.status] ?? 0) - (statusOrder[b.status] ?? 0)) * dir
-        case 'stage':
+        case SortField.Stage:
           return ((stageOrder[taskStore.getTaskStageValue(a)] ?? 0) - (stageOrder[taskStore.getTaskStageValue(b)] ?? 0)) * dir
-        case 'priority':
+        case SortField.Priority:
           return ((priorityOrder[a.priority] ?? 0) - (priorityOrder[b.priority] ?? 0)) * dir
-        case 'assignee': {
+        case SortField.Assignee: {
           const aName = getMember(a.assigneeId)?.name || ''
           const bName = getMember(b.assigneeId)?.name || ''
           return windowsCompare(aName, bName) * dir
         }
-        case 'dueDate': {
+        case SortField.DueDate: {
           const aDate = a.dueDate ? new Date(a.dueDate).getTime() : Infinity
           const bDate = b.dueDate ? new Date(b.dueDate).getTime() : Infinity
           return (aDate - bDate) * dir
@@ -464,14 +476,14 @@ async function handleSave(taskData: Partial<Task>) {
     saved = await taskStore.createTask({
       title: taskData.title || '',
       description: taskData.description || '',
-      itemType: taskData.itemType || 'task',
+      itemType: taskData.itemType || TaskItemType.Task,
       parentRequirementId: taskData.parentRequirementId || null,
-      status: taskData.status || 'todo',
-      priority: taskData.priority || 'medium',
+      status: taskData.status || TaskStatusEnum.Todo,
+      priority: taskData.priority || TaskPriorityEnum.Medium,
       dueDate: taskData.dueDate || null,
       projectId: taskData.projectId || projectStore.currentProjectId || '',
       assigneeId: taskData.assigneeId || null,
-      stage: taskData.stage || 'filed',
+      stage: taskData.stage || TaskStageEnum.Filed,
       phases: taskData.phases || [],
       currentPhaseId: taskData.currentPhaseId || null,
       planningId: taskData.planningId || null,
@@ -584,12 +596,12 @@ function getRequirementProgressText(task: Task): string {
 
     <div v-if="listEntries.length > 0" class="task-table">
       <div class="table-header">
-        <div class="col col-title sortable" @click="toggleSort('title')">标题{{ getSortIcon('title') }}</div>
-        <div class="col col-status sortable" @click="toggleSort('status')">状态{{ getSortIcon('status') }}</div>
-        <div class="col col-stage sortable" @click="toggleSort('stage')">阶段{{ getSortIcon('stage') }}</div>
-        <div class="col col-priority sortable" @click="toggleSort('priority')">优先级{{ getSortIcon('priority') }}</div>
-        <div class="col col-assignee sortable" @click="toggleSort('assignee')">负责人{{ getSortIcon('assignee') }}</div>
-        <div class="col col-due sortable" @click="toggleSort('dueDate')">截止日期{{ getSortIcon('dueDate') }}</div>
+        <div class="col col-title sortable" @click="toggleSort(SortField.Title)">标题{{ getSortIcon(SortField.Title) }}</div>
+        <div class="col col-status sortable" @click="toggleSort(SortField.Status)">状态{{ getSortIcon(SortField.Status) }}</div>
+        <div class="col col-stage sortable" @click="toggleSort(SortField.Stage)">阶段{{ getSortIcon(SortField.Stage) }}</div>
+        <div class="col col-priority sortable" @click="toggleSort(SortField.Priority)">优先级{{ getSortIcon(SortField.Priority) }}</div>
+        <div class="col col-assignee sortable" @click="toggleSort(SortField.Assignee)">负责人{{ getSortIcon(SortField.Assignee) }}</div>
+        <div class="col col-due sortable" @click="toggleSort(SortField.DueDate)">截止日期{{ getSortIcon(SortField.DueDate) }}</div>
         <div class="col col-action">操作</div>
       </div>
       <div class="table-body">

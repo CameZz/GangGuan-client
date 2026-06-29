@@ -6,6 +6,7 @@ import type { Notification } from '@/types'
 import { notificationApi } from '@/api/notifications'
 import { unwrapApiData } from '@/api'
 import { wsService } from '@/utils/websocket'
+import { WSMessageType } from '@/types'
 
 export const useNotificationStore = defineStore('notification', () => {
   const notifications = ref<Notification[]>([])
@@ -87,7 +88,7 @@ export const useNotificationStore = defineStore('notification', () => {
   }
 
   // WebSocket handlers
-  wsService.on('notification:create', (notification: Notification) => {
+  wsService.on(WSMessageType.NotificationCreate, (notification: Notification) => {
     console.log('[WS] notification:create received', notification?.id)
     // Prepend to list if loaded
     if (notifications.value.length > 0) {
@@ -100,7 +101,7 @@ export const useNotificationStore = defineStore('notification', () => {
     unreadCount.value++
   })
 
-  wsService.on('notification:update', (notification: Notification) => {
+  wsService.on(WSMessageType.NotificationUpdate, (notification: Notification) => {
     console.log('[WS] notification:update received', notification?.id)
     const index = notifications.value.findIndex(n => n.id === notification.id)
     if (index !== -1) {
@@ -112,7 +113,7 @@ export const useNotificationStore = defineStore('notification', () => {
     }
   })
 
-  wsService.on('notification:read-all', (data: { readAt: string; count: number }) => {
+  wsService.on(WSMessageType.NotificationReadAll, (data: { readAt: string; count: number }) => {
     console.log('[WS] notification:read-all received', data)
     const now = data.readAt
     notifications.value = notifications.value.map(n =>

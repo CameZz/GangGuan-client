@@ -6,6 +6,7 @@ import type { Project, ProjectMember, ProjectPhaseTemplate, User } from '@/types
 import { projectApi } from '@/api/projects'
 import { unwrapApiData } from '@/api'
 import { wsService } from '@/utils/websocket'
+import { WSMessageType } from '@/types'
 
 export const useProjectStore = defineStore('project', () => {
   const projects = ref<Project[]>([])
@@ -299,15 +300,15 @@ export const useProjectStore = defineStore('project', () => {
     }
   }
 
-  wsService.on('project:create', (project: Project) => {
+  wsService.on(WSMessageType.ProjectCreate, (project: Project) => {
     upsertProject(project)
   })
 
-  wsService.on('project:update', (project: Project) => {
+  wsService.on(WSMessageType.ProjectUpdate, (project: Project) => {
     upsertProject(project)
   })
 
-  wsService.on('project:delete', ({ id }: { id: string }) => {
+  wsService.on(WSMessageType.ProjectDelete, ({ id }: { id: string }) => {
     projects.value = projects.value.filter(p => p.id !== id)
   })
 

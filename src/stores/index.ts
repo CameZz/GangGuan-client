@@ -10,6 +10,7 @@ import { useNotificationStore } from "./notification";
 import { useApprovalStore } from "./approval";
 import { wsService } from "@/utils/websocket";
 import { getWebSocketUrl, loadAppConfig } from "@/utils/config";
+import { WSMessageType } from '@/types'
 
 export const pinia = createPinia();
 
@@ -153,11 +154,11 @@ class StoresManager {
     private registerSyncInitHandler() {
         if (this.hasSyncInitHandler) return;
 
-        wsService.on('sync:init', (data: any) => {
+        wsService.on(WSMessageType.SyncInit, (data: any) => {
             this.applySyncData(data);
         });
 
-        wsService.on('sync:update', (data: any) => {
+        wsService.on(WSMessageType.SyncUpdate, (data: any) => {
             console.log('[WS] sync:update received', data);
             this.applySyncData(data);
         });

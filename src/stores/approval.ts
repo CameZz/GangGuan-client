@@ -2,31 +2,35 @@
 
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import type { TaskApprovalRequest, ApprovalStatus, Notification } from '@/types'
+import type { TaskApprovalRequest, Notification } from '@/types'
+import { ApprovalStatus, NotificationType, WSMessageType } from '@/types'
 import { approvalApi } from '@/api/approvals'
 import { unwrapApiData } from '@/api'
 import { wsService } from '@/utils/websocket'
 
-type ApprovalListScope = 'review' | 'submitted'
+export enum ApprovalListScope {
+  Review = 'review',
+  Submitted = 'submitted'
+}
 
 export const useApprovalStore = defineStore('approval', () => {
   const approvals = ref<TaskApprovalRequest[]>([])
   const isLoading = ref(false)
-  const statusFilter = ref<ApprovalStatus | 'all'>('pending')
+  const statusFilter = ref<ApprovalStatus | 'all'>(ApprovalStatus.Pending)
   const projectFilter = ref<string | 'all'>('all')
-  const scopeFilter = ref<ApprovalListScope>('review')
+  const scopeFilter = ref<ApprovalListScope>(ApprovalListScope.Review)
   const pendingReviewCount = ref(0)
 
   const pendingApprovals = computed(() =>
-    approvals.value.filter(a => a.status === 'pending')
+    approvals.value.filter(a => a.status === ApprovalStatus.Pending)
   )
 
   const approvedApprovals = computed(() =>
-    approvals.value.filter(a => a.status === 'approved')
+    approvals.value.filter(a => a.status === ApprovalStatus.Approved)
   )
 
   const rejectedApprovals = computed(() =>
-    approvals.value.filter(a => a.status === 'rejected')
+    approvals.value.filter(a => a.status === ApprovalStatus.Rejected)
   )
 
   const pendingCount = computed(() => pendingReviewCount.value)
@@ -47,7 +51,7 @@ export const useApprovalStore = defineStore('approval', () => {
       )
       if (data?.approvals) {
         approvals.value = data.approvals
-        if (scopeFilter.value === 'review' && statusFilter.value === 'pending' && projectFilter.value === 'all') {
+        if (scopeFilter.value === ApprovalListScope.Review && statusFilter.value === ApprovalStatus.Pending && projectFilter.value === 'all') {
           pendingReviewCount.value = data.approvals.length
         }
       }
@@ -61,7 +65,7 @@ export const useApprovalStore = defineStore('approval', () => {
   async function fetchPendingReviewCount(): Promise<void> {
     try {
       const data = unwrapApiData<{ approvals: TaskApprovalRequest[] }>(
-        await approvalApi.list({ status: 'pending', scope: 'review' })
+        await approvalApi.list({ status: ApprovalStatus.Pending, scope: ApprovalListScope.Review })
       )
       pendingReviewCount.value = data?.approvals?.length || 0
     } catch (error) {
@@ -85,8 +89,8 @@ export const useApprovalStore = defineStore('approval', () => {
       if (result?.approval) {
         // 如果当前筛选条件包含该状态，添加到列表
         if (
-          scopeFilter.value === 'submitted' &&
-          (statusFilter.value === 'all' || statusFilter.value === 'pending') &&
+          scopeFilter.value === ApprovalListScope.Submitted &&
+          (statusFilter.value === 'all' || statusFilter.value === ApprovalStatus.Pending) &&
           (projectFilter.value === 'all' || projectFilter.value === result.approval.projectId)
         ) {
           approvals.value.unshift(result.approval)
@@ -161,15 +165,15 @@ export const useApprovalStore = defineStore('approval', () => {
 
   function clearData(): void {
     approvals.value = []
-    statusFilter.value = 'pending'
+    statusFilter.value = ApprovalStatus.Pending
     projectFilter.value = 'all'
-    scopeFilter.value = 'review'
+    scopeFilter.value = ApprovalListScope.Review
     pendingReviewCount.value = 0
   }
 
   // 收到新审批通知时，自动刷新待审数量
-  wsService.on('notification:create', (notification: Notification) => {
-    if (notification.type === 'approval_submitted') {
+  wsService.on(WSMessageType.NotificationCreate, (notification: Notification) => {
+    if (notification.type === NotificationType.ApprovalSubmitted) {
       fetchPendingReviewCount()
     }
   })
